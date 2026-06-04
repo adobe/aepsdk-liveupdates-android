@@ -11,4 +11,12 @@
   governing permissions and limitations under the License.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+        Required since Android 13 (API 33) to post any notification.
+        Declared here so it merges into the consumer app's manifest automatically;
+        the customer app is responsible for requesting this permission at runtime.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
 </manifest>

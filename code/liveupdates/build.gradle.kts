@@ -21,22 +21,36 @@ val mavenEdgeVersion: String by project
 aepLibrary {
     namespace = "com.adobe.marketing.mobile.liveupdates"
     enableSpotless = true
+    enableSpotlessPrettierForJava = true
     enableCheckStyle = true
     enableDokkaDoc = true
-    compose = true
+    // compose = false (default) — the SDK has no UI of its own
 
     publishing {
         gitRepoName = "aepsdk-liveupdates-android"
         addCoreDependency(mavenCoreVersion)
         addEdgeDependency(mavenEdgeVersion)
-
-        addMavenDependency("org.jetbrains.kotlin", "kotlin-stdlib-jdk8", BuildConstants.Versions.KOTLIN)
-        addMavenDependency("androidx.appcompat", "appcompat", BuildConstants.Versions.ANDROIDX_APPCOMPAT)
-        addMavenDependency("androidx.compose.runtime", "runtime", BuildConstants.Versions.COMPOSE)
-        addMavenDependency("androidx.activity", "activity-compose", BuildConstants.Versions.ANDROIDX_ACTIVITY_COMPOSE)
     }
 }
 
 dependencies {
+    // Live Update APIs: NotificationCompat.ProgressStyle, setRequestPromotedOngoing,
+    // NotificationManagerCompat — all in androidx.core 1.17.0 (MANDATORY)
+    implementation(BuildConstants.Dependencies.ANDROIDX_CORE_KTX)
+
+    // AEP extension registration and Event Hub
     implementation("com.adobe.marketing.mobile:core:$mavenCoreVersion")
+
+    // Edge Network for Live Update lifecycle telemetry
+    implementation("com.adobe.marketing.mobile:edge:$mavenEdgeVersion")
+
+    // Coroutines for off-main-thread notification posting / updates
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // Optional — add when lifecycle-aware dismissal / refresh is implemented:
+    // implementation(BuildConstants.Dependencies.ANDROIDX_LIFECYCLE_KTX)
+
+    // No further test deps needed — commons auto-adds JUnit, Mockito, MockK,
+    // Robolectric, kotlin-test, kotlinx-coroutines-test, espresso-core,
+    // androidx.test:rules, androidx.test.ext:junit.
 }
