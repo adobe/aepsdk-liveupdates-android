@@ -31,17 +31,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "aepsdk-liveupdates-android"
 include(":testapp", ":liveupdates")
-
-// Composite build: the messaging repo is included here per the original intent of consuming
-// messaging from live source code. In practice, composite build substitution does not fire
-// because:
-//   1. The aep-library plugin sets groupId inside the Maven publication but does not set
-//      project.group, so Gradle cannot auto-detect the com.adobe.marketing.mobile:messaging
-//      → :messaging substitution.
-//   2. Adding an explicit substitution rule triggers AGP's AgpVersionCompatibilityRule, which
-//      rejects mixing AGP 8.2.0 (messaging / commons 3.x) with AGP 8.9.1 (this SDK / commons
-//      4.0.0) inside a single composite build.
-// As a result, com.adobe.marketing.mobile:messaging resolves from Maven Central via the BOM.
-// TODO: investigate if an AGP attribute compatibility override can make local-source substitution
-//       work, or switch to publishToMavenLocal as the live-source workflow for messaging.
-includeBuild("../../aepsdk-messaging-android/code")
