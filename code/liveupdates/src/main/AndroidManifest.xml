@@ -19,4 +19,11 @@
     -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+        Required to request promotion of a notification to the status bar chip
+        (Live Updates / promoted ongoing). This is a non-runtime permission —
+        the system grants it at install time; no user prompt is shown.
+    -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+
 </manifest>
