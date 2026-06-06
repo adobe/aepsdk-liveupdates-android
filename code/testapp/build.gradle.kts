@@ -14,6 +14,9 @@ import com.adobe.marketing.mobile.gradle.BuildConstants
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    // Kotlin 2.0 ships the Compose compiler as a first-party plugin; no version needed
+    // because it resolves from the same Kotlin 2.0.21 distribution already on the classpath.
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -30,8 +33,6 @@ android {
 
     kotlinOptions {
         jvmTarget = BuildConstants.Versions.KOTLIN_JVM_TARGET
-        languageVersion = BuildConstants.Versions.KOTLIN_LANGUAGE_VERSION
-        apiVersion = BuildConstants.Versions.KOTLIN_API_VERSION
     }
 
     buildTypes {
@@ -39,16 +40,19 @@ android {
             isMinifyEnabled = false
         }
     }
+
+    buildFeatures {
+        compose = true
+        // No composeOptions / kotlinCompilerExtensionVersion needed with Kotlin 2.0 plugin
+    }
 }
 
 dependencies {
-    // New SDK under construction, via project reference.
+    // New SDK under construction
     implementation(project(":liveupdates"))
 
-    // AEP SDK BOM pins versions for core/lifecycle/edge/edgeidentity/assurance.
-    // messaging is declared here but auto-substituted with the local includeBuild source.
+    // AEP SDK BOM
     implementation(platform("com.adobe.marketing.mobile:sdk-bom:3.13.0"))
-
     implementation("com.adobe.marketing.mobile:messaging")
     implementation("com.adobe.marketing.mobile:core")
     implementation("com.adobe.marketing.mobile:lifecycle")
@@ -56,5 +60,12 @@ dependencies {
     implementation("com.adobe.marketing.mobile:edgeidentity")
     implementation("com.adobe.marketing.mobile:assurance")
 
-    implementation("androidx.appcompat:appcompat:1.6.1")
+
+    // Compose BOM + UI
+    implementation(platform("androidx.compose:compose-bom:2024.10.00"))
+    implementation("androidx.activity:activity-compose")
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    debugImplementation("androidx.compose.ui:ui-tooling")
 }

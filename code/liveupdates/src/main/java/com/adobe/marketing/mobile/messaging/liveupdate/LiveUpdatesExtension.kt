@@ -9,7 +9,7 @@
   governing permissions and limitations under the License.
 */
 
-package com.adobe.marketing.mobile.liveupdates
+package com.adobe.marketing.mobile.messaging.liveupdate
 
 /**
  * Placeholder for the Live Updates extension. Functionality will be added

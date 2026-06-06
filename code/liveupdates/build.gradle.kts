@@ -19,7 +19,7 @@ val mavenCoreVersion: String by project
 val mavenEdgeVersion: String by project
 
 aepLibrary {
-    namespace = "com.adobe.marketing.mobile.liveupdates"
+    namespace = "com.adobe.marketing.mobile.messaging.liveupdate"
     enableSpotless = true
     enableSpotlessPrettierForJava = true
     enableCheckStyle = true
