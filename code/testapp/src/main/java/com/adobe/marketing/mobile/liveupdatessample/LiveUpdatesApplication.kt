@@ -12,14 +12,42 @@
 package com.adobe.marketing.mobile.liveupdatessample
 
 import android.app.Application
-import com.adobe.marketing.mobile.MobileCore
+import com.adobe.marketing.mobile.Assurance
+import com.adobe.marketing.mobile.Edge
+import com.adobe.marketing.mobile.Lifecycle
 import com.adobe.marketing.mobile.LoggingMode
+import com.adobe.marketing.mobile.Messaging
+import com.adobe.marketing.mobile.MobileCore
+import com.adobe.marketing.mobile.edge.identity.Identity
+import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdateRenderer
 
 class LiveUpdatesApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+
         MobileCore.setApplication(this)
         MobileCore.setLogLevel(LoggingMode.VERBOSE)
+        // Fallback small icon for ALL Messaging-built notifications. Android refuses to
+        // post a notification without a small icon; the testapp has no mipmap, so we
+        // point at a platform drawable. Replace with R.drawable.ic_notification in a real app.
+        MobileCore.setSmallIconResourceID(android.R.drawable.ic_popup_reminder)
+
+        val extensions = listOf(
+            Messaging.EXTENSION,
+            Identity.EXTENSION,
+            Lifecycle.EXTENSION,
+            Edge.EXTENSION,
+            Assurance.EXTENSION
+        )
+        MobileCore.registerExtensions(extensions) {
+            // TODO: replace with real AJO config app id before testing real pushes.
+            // MobileCore.configureWithAppID("YOUR_APP_ID")
+            MobileCore.lifecycleStart(null)
+        }
+
+        // Single line of Live Updates wiring — replaces the previous
+        // LiveUpdates.setApplication / LiveUpdates.registerStyleProvider pair.
+        Messaging.setLiveUpdateHandler(LiveUpdateRenderer(SampleLiveUpdateStyleProvider()))
     }
 }

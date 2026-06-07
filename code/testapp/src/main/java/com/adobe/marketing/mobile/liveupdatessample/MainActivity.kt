@@ -12,9 +12,14 @@
 package com.adobe.marketing.mobile.liveupdatessample
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
@@ -33,41 +38,32 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdateNotificationManager
+import com.google.firebase.messaging.FirebaseMessaging
 
 class MainActivity : ComponentActivity() {
 
-    private var isRunning by mutableStateOf(false)
-
-    private val liveUpdateManager by lazy {
-        LiveUpdateNotificationManager(this, onComplete = { isRunning = false })
+    companion object {
+        private const val TAG = "LiveUpdateSample"
     }
+
+    private var fcmToken by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // LiveUpdate wiring lives in LiveUpdatesApplication.onCreate now — single call to
+        // Messaging.setLiveUpdateHandler(LiveUpdateRenderer(...)).
         requestNotificationPermission()
+        fetchFcmToken()
+
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    LiveUpdateScreen(
-                        isRunning = isRunning,
-                        onStartClick = ::startLiveUpdate
-                    )
+                    LiveUpdateInfoScreen(fcmToken = fcmToken)
                 }
             }
         }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        liveUpdateManager.stop()
-    }
-
-    private fun startLiveUpdate() {
-        if (isRunning) return
-        isRunning = true
-        liveUpdateManager.start()
     }
 
     private fun requestNotificationPermission() {
@@ -75,20 +71,30 @@ class MainActivity : ComponentActivity() {
             if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED
             ) {
-                requestPermissions(
-                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                    100
-                )
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100)
             }
+        }
+    }
+
+    private fun fetchFcmToken() {
+        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+            if (!task.isSuccessful) {
+                Log.w(TAG, "Fetching FCM token failed", task.exception)
+                return@addOnCompleteListener
+            }
+            val token = task.result
+            fcmToken = token
+            // Clearly tagged so it's easy to grep from logcat:
+            //   adb logcat -s LiveUpdateSample
+            Log.d(TAG, "FCM_TOKEN=$token")
         }
     }
 }
 
 @Composable
-private fun LiveUpdateScreen(
-    isRunning: Boolean,
-    onStartClick: () -> Unit
-) {
+private fun LiveUpdateInfoScreen(fcmToken: String?) {
+    val context = LocalContext.current
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -97,15 +103,43 @@ private fun LiveUpdateScreen(
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = if (isRunning) "Live Update running…" else "Tap to start a Live Update",
-            style = MaterialTheme.typography.bodyLarge
+            text = "Live Updates sample",
+            style = MaterialTheme.typography.headlineSmall
         )
-        Spacer(modifier = Modifier.height(24.dp))
-        Button(
-            onClick = onStartClick,
-            enabled = !isRunning
-        ) {
-            Text(text = if (isRunning) "Running…" else "Start Live Update")
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = if (fcmToken != null) "✅ FCM token ready" else "⏳ Loading FCM token…",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        if (fcmToken != null) {
+            Text(
+                text = fcmToken,
+                style = MaterialTheme.typography.bodySmall
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(onClick = { copyToClipboard(context, fcmToken, "FCM token") }) {
+                Text("Copy FCM token")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    copyToClipboard(context, "./fcm.sh $fcmToken", "fcm.sh command")
+                }
+            ) {
+                Text("Copy ./fcm.sh <token> command")
+            }
         }
+        Spacer(modifier = Modifier.height(24.dp))
+        Text(
+            text = "Run the copied command from the repo root to send a Live Update push.",
+            style = MaterialTheme.typography.bodySmall
+        )
     }
+}
+
+private fun copyToClipboard(context: Context, text: String, label: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
+    Toast.makeText(context, "$label copied", Toast.LENGTH_SHORT).show()
 }

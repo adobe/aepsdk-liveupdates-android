@@ -21,5 +21,7 @@ buildscript {
     }
     dependencies {
         classpath("com.github.adobe.aepsdk-commons:aepsdk-gradle-plugin:4.0.0")
+        // Reads testapp/google-services.json and configures Firebase at build time.
+        classpath("com.google.gms:google-services:4.4.1")
     }
 }

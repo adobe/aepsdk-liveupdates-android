@@ -83,3 +83,7 @@ code/messaging/cache/
 code/liveupdates/build/
 code/liveupdates/mock_cache/*
 code/liveupdates/jacoco.exec
+
+# Firebase secrets — never commit
+fcm-key.json
+**/google-services.json

@@ -17,6 +17,7 @@ plugins {
 
 val mavenCoreVersion: String by project
 val mavenEdgeVersion: String by project
+val mavenMessagingVersion: String by project
 
 aepLibrary {
     namespace = "com.adobe.marketing.mobile.messaging.liveupdate"
@@ -30,6 +31,7 @@ aepLibrary {
         gitRepoName = "aepsdk-liveupdates-android"
         addCoreDependency(mavenCoreVersion)
         addEdgeDependency(mavenEdgeVersion)
+        addMavenDependency("com.adobe.marketing.mobile", "messaging", mavenMessagingVersion)
     }
 }
 
@@ -38,19 +40,13 @@ dependencies {
     // NotificationManagerCompat — all in androidx.core 1.17.0 (MANDATORY)
     implementation(BuildConstants.Dependencies.ANDROIDX_CORE_KTX)
 
-    // AEP extension registration and Event Hub
+    // AEP extension registration and Event Hub — sourced from mavenLocal at 3.8.0
     implementation("com.adobe.marketing.mobile:core:$mavenCoreVersion")
+
+    // Messaging — required for LiveUpdateHandler interface, MessagingPushPayload,
+    // Messaging.setLiveUpdateHandler. Sourced from mavenLocal at 3.10.0.
+    implementation("com.adobe.marketing.mobile:messaging:$mavenMessagingVersion")
 
     // Edge Network for Live Update lifecycle telemetry
     implementation("com.adobe.marketing.mobile:edge:$mavenEdgeVersion")
-
-    // Coroutines for off-main-thread notification posting / updates
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-
-    // Optional — add when lifecycle-aware dismissal / refresh is implemented:
-    // implementation(BuildConstants.Dependencies.ANDROIDX_LIFECYCLE_KTX)
-
-    // No further test deps needed — commons auto-adds JUnit, Mockito, MockK,
-    // Robolectric, kotlin-test, kotlinx-coroutines-test, espresso-core,
-    // androidx.test:rules, androidx.test.ext:junit.
 }
