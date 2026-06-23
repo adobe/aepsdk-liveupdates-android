@@ -1,31 +1,27 @@
 #!/bin/bash
 #
-# Sends a sequence of Live Update pushes to a single device via FCM v1 API.
-# Mirrors the APNS Live Activity lifecycle: 1× start, 2× update, 1× end.
-# All four stages share the same live_update_id, so each push updates the same chip.
+# Sends a sequence of FOUR production-shape Live Update pushes to a single device via FCM v1 API.
+# All four stages share the same notification_id, so each push updates the same chip in place.
 #
-# Payload shape (FCM data map):
-#   _xdm                  — AJO marker (satisfies isAJONotification)
-#   adb_title / adb_body  — standard Messaging keys, parsed by MessagingPushBuilder
-#   adb_channel_id        — HIGH-importance channel for promotion eligibility
-#   adb_n_priority        — PRIORITY_HIGH
-#   adb_live_update_data  — JSON-stringified envelope:
-#       live_update_id            (required)
-#       live_update_template_type ("progress" — drives ProgressStyle)
-#       live_update_event         ("start" | "update" | "end")
-#       live_update_timestamp     (unix sec)
-#       live_update_dismiss_at    (unix sec, only on "end")
-#       live_update_critical_text (status bar chip short text)
-#       live_update_content_state ({"journeyProgress": N, ...})
+# Production payload shape (matches the design wiki and AJO authoring contract):
+#   message.android.data._xdm                  - full AJO XDM mixins (messageExecution,
+#                                                campaignID, decisioning, etc.). Opaque to
+#                                                the on-device SDK; flows to AJO reporting
+#                                                via Edge.
+#   message.android.data.adb_liveupdate_data   - JSON-stringified Live Update envelope:
+#       notification_id, channel_id, event_type, title  (REQUIRED v1.1)
+#       priority, body, critical_text, when, dismiss_after, topic_name (optional)
+#       action_type, action_uri, action_buttons[] (tap intent fields)
+#       content_state{} (app-defined opaque object, parsed by StyleProvider)
+#
+# NOTE on data placement: this script puts data under `android.data` (Android-specific
+# delivery), matching the production backend convention. The on-device SDK reads from
+# RemoteMessage.getData() either way - FCM merges `message.data` and `message.android.data`
+# transparently. Use `android.data` when the payload is Android-only (as Live Updates are).
 #
 # Usage:
 #   ./fcm.sh <FCM_TOKEN> [DELAY_SECONDS]
-#
-# Get FCM_TOKEN from the running app's UI ("Copy FCM token") or:
-#   adb logcat -s LiveUpdateSample
-#
-# Override the live update id (chip identity) with:
-#   LIVE_UPDATE_ID=flight_AA241 ./fcm.sh <token>
+#   NOTIFICATION_ID=flight_AA241 ./fcm.sh <token>
 
 set -euo pipefail
 
@@ -34,53 +30,111 @@ SERVICE_ACCOUNT_KEY="$(dirname "$0")/fcm-key.json"
 
 FCM_TOKEN="${1:-}"
 DELAY="${2:-3}"
-LIVE_UPDATE_ID="${LIVE_UPDATE_ID:-flight_demo_001}"
+NOTIFICATION_ID="${NOTIFICATION_ID:-flight_DL241_2026_01_15}"
+CHANNEL_ID="live_updates_channel"
+TOPIC_NAME="flight_DL241"
 
 if [ -z "$FCM_TOKEN" ]; then
-    echo "❌ Usage: $0 <FCM_TOKEN> [DELAY_SECONDS]"
+    echo "Usage: $0 <FCM_TOKEN> [DELAY_SECONDS]"
     exit 1
 fi
-
 if [ ! -f "$SERVICE_ACCOUNT_KEY" ]; then
-    echo "❌ Missing service account key: $SERVICE_ACCOUNT_KEY"
+    echo "Missing service account key: $SERVICE_ACCOUNT_KEY"
     exit 1
 fi
 
-echo "🔐 Authenticating with service account..."
+echo "Authenticating..."
 gcloud auth activate-service-account --key-file="$SERVICE_ACCOUNT_KEY" > /dev/null
-
-echo "🎟️  Generating access token..."
 ACCESS_TOKEN=$(gcloud auth print-access-token)
-if [ -z "$ACCESS_TOKEN" ]; then
-    echo "❌ Failed to generate access token"
-    exit 1
-fi
 
-# send_stage TITLE BODY CRITICAL_TEXT PROGRESS EVENT [DISMISS_AFTER_SECONDS]
-#
-# CRITICAL_TEXT shows in the status bar chip.
-# DISMISS_AFTER_SECONDS is a relative duration; meaningful only when EVENT == "end".
+# Full _xdm passthrough block - server-defined contents. Stripped to the AJO-relevant
+# mixins for demo purposes; production payloads carry the entire customer journey
+# management + decisioning XDM.
+build_xdm() {
+    local event_type="$1"
+    cat <<EOF
+{
+  "mixins": {
+    "_experience": {
+      "customerJourneyManagement": {
+        "messageExecution": {
+          "messageExecutionID": "HUPU-59740365",
+          "messageID": "6750d3a0-9ac7-4944-97d8-21ecbab9bc8a-0",
+          "messageType": "transactional",
+          "campaignID": "96008fbe-4dfa-445f-80d5-10287a54e948",
+          "campaignVersionID": "843f2ea5-815d-466b-9754-ab5e57b3d8de",
+          "campaignActionID": "3cbb4bb7-60af-439f-bdbe-216f14cbd47f",
+          "batchInstanceID": "e37a8db9-1359-46ac-a67c-1266b275cc68"
+        }
+      },
+      "decisioning": {
+        "propositions": [
+          { "scopeDetails": { "correlationID": "6750d3a0-9ac7-4944-97d8-21ecbab9bc8a-0" } }
+        ]
+      }
+    }
+  },
+  "liveupdate_event_type": "$event_type",
+  "liveupdate_type": "unitary",
+  "liveupdate_topic_name": "$TOPIC_NAME"
+}
+EOF
+}
+
+# Action buttons - same across all stages for this demo. Two buttons: a DEEPLINK and a WEBURL.
+ACTION_BUTTONS='[{"label":"Snooze","uri":"myapp://flight/DL241/snooze","type":"DEEPLINK"},{"label":"View","uri":"https://airline.example/DL241","type":"WEBURL"}]'
+
+# send_stage TITLE BODY CRITICAL_TEXT PROGRESS EVENT_TYPE [DISMISS_AFTER_SECONDS]
 send_stage() {
     local title="$1"
     local body="$2"
     local critical="$3"
     local progress="$4"
-    local event="$5"
+    local event_type="$5"
     local dismiss_after="${6:-}"
 
     local dismiss_after_field=""
-    if [ -n "$dismiss_after" ] && [ "$event" = "end" ]; then
-        dismiss_after_field=",\"live_update_dismiss_after\":$dismiss_after"
+    if [ -n "$dismiss_after" ]; then
+        dismiss_after_field=",\"dismiss_after\":$dismiss_after"
     fi
 
+    local now_ms
+    now_ms=$(($(date +%s) * 1000))
+
     local envelope
-    envelope="{\"live_update_id\":\"$LIVE_UPDATE_ID\",\"live_update_template_type\":\"progress\",\"live_update_event\":\"$event\",\"live_update_critical_text\":\"$critical\",\"live_update_content_state\":{\"journeyProgress\":$progress}$dismiss_after_field}"
+    envelope=$(cat <<EOF
+{
+  "notification_id":  "$NOTIFICATION_ID",
+  "channel_id":       "$CHANNEL_ID",
+  "priority":         "PRIORITY_HIGH",
+  "event_type":       "$event_type",
+  "topic_name":       "$TOPIC_NAME",
+  "title":            "$title",
+  "body":             "$body",
+  "critical_text":    "$critical",
+  "when":             $now_ms,
+  "action_type":      "DEEPLINK",
+  "action_uri":       "myapp://flight/DL241",
+  "action_buttons":   $ACTION_BUTTONS,
+  "content_state": {
+    "custom_key_template_type":    "progress",
+    "custom_key_journey_start":    "DEL",
+    "custom_key_journey_progress": $progress,
+    "custom_key_journey_end":      "MUM"
+  }$dismiss_after_field
+}
+EOF
+)
 
-    # Escape double-quotes for embedding inside the outer curl JSON.
-    local envelope_escaped
-    envelope_escaped=$(printf '%s' "$envelope" | sed 's/"/\\"/g')
+    local xdm
+    xdm=$(build_xdm "$event_type")
 
-    echo "📤 Stage: event=$event  progress=$progress  '$title'"
+    # Escape inner JSON for embedding in the outer FCM JSON.
+    local xdm_escaped envelope_escaped
+    xdm_escaped=$(printf '%s' "$xdm" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))")
+    envelope_escaped=$(printf '%s' "$envelope" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))")
+
+    echo "Stage: event_type=$event_type progress=$progress '$title'"
 
     local response
     response=$(curl -s -X POST \
@@ -90,27 +144,25 @@ send_stage() {
         -d "{
           \"message\": {
             \"token\": \"$FCM_TOKEN\",
-            \"android\": { \"priority\": \"HIGH\" },
-            \"data\": {
-              \"_xdm\": \"{}\",
-              \"adb_title\": \"$title\",
-              \"adb_body\": \"$body\",
-              \"adb_channel_id\": \"live_updates_channel\",
-              \"adb_n_priority\": \"PRIORITY_HIGH\",
-              \"adb_live_update_data\": \"$envelope_escaped\"
+            \"android\": {
+              \"priority\": \"HIGH\",
+              \"data\": {
+                \"_xdm\": $xdm_escaped,
+                \"adb_liveupdate_data\": $envelope_escaped
+              }
             }
           }
         }")
 
     if echo "$response" | grep -q "\"name\""; then
-        echo "   ✅ Delivered"
+        echo "  Delivered"
     else
-        echo "   ❌ Send failed: $response"
+        echo "  Send failed: $response"
         exit 1
     fi
 }
 
-echo "🛫 Live Update demo — chip id=$LIVE_UPDATE_ID, delay=${DELAY}s"
+echo "Live Update demo - chip id=$NOTIFICATION_ID, delay=${DELAY}s"
 echo "=========================================="
 
 send_stage "Flight on time"     "Boarding starts shortly"       "25 min" 10  "start"
@@ -119,9 +171,7 @@ send_stage "Boarding"           "Gate D22, boarding now"        "Now"    40  "up
 sleep "$DELAY"
 send_stage "In flight"          "Estimated landing 3:45 PM"     "1h 15m" 70  "update"
 sleep "$DELAY"
-# end event with auto-dismiss 5 seconds after delivery (dismiss_at = now + 5 computed inside send_stage)
 send_stage "Landed"             "Welcome to MUM"                "Done"   100 "end" 5
 
 echo "=========================================="
-echo "🎉 All 4 stages sent. The chip should have updated in place,"
-echo "   then auto-dismissed 5s after the 'end' event."
+echo "All 4 stages sent. Chip should update in place, then dismiss 5s after the final stage."

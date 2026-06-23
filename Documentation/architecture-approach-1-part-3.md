@@ -22,6 +22,35 @@ where they conflict.
 
 ## 2. Dependency structure
 
+```mermaid
+flowchart TB
+    App["<b>Customer App</b><br/>compileSdk 36, commons 4.0.0<br/>(or any compileSdk ≥ 36)"]
+
+    LU["<b>Live Updates SDK</b><br/>aepsdk-liveupdates-android<br/>compileSdk 36, commons 4.0.0<br/>package: com.adobe.marketing.mobile.messaging.liveupdate"]
+
+    Msg["<b>Messaging SDK</b><br/>aepsdk-messaging-android<br/>compileSdk 34, commons 3.x"]
+
+    Edge["<b>Edge / EdgeIdentity</b><br/>existing AEP family<br/>compileSdk 34"]
+
+    Core["<b>Core SDK</b><br/>aepsdk-core-android<br/>compileSdk 34, commons 3.x"]
+
+    App -->|depends on| LU
+    App -->|depends on| Msg
+    LU -->|depends on| Msg
+    LU -->|depends on| Edge
+    Msg -->|depends on| Core
+    Edge -->|depends on| Core
+
+    classDef new fill:#d0ebff,stroke:#1971c2,color:#000
+    classDef existing fill:#fff,stroke:#868e96,color:#000
+    classDef app fill:#fff3bf,stroke:#f59f00,color:#000
+    class App app
+    class LU new
+    class Msg,Edge,Core existing
+```
+
+ASCII fallback for renderers without mermaid:
+
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  Customer App                                           │

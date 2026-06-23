@@ -15,6 +15,7 @@ import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -22,6 +23,7 @@ import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import com.adobe.marketing.mobile.Messaging
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -52,10 +54,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // LiveUpdate wiring lives in LiveUpdatesApplication.onCreate now — single call to
-        // Messaging.setLiveUpdateHandler(LiveUpdateRenderer(...)).
+        // LiveUpdate wiring lives in LiveUpdatesApplication.onCreate now - single call to
+        // Messaging.setLiveUpdateHandler(LiveUpdateHandlerImpl(...)).
         requestNotificationPermission()
         fetchFcmToken()
+
+        // Handle a notification tap that launched (or re-fronted) this activity.
+        // No-ops if the intent has no AEP tracking extras.
+        fireTapTrackingIfAny(intent)
 
         setContent {
             MaterialTheme {
@@ -64,6 +70,26 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // Called when the activity is reused (launchMode="singleTop"). Fire tracking for
+        // the new tap. The new intent will already carry the messageId + xdm extras
+        // injected by SampleNotificationService via Messaging.addPushTrackingDetails.
+        setIntent(intent)
+        fireTapTrackingIfAny(intent)
+    }
+
+    /**
+     * Fires a push-tap tracking event if the intent carries AEP tracking extras
+     * (messageId + adobe_xdm), injected upstream by [Messaging.addPushTrackingDetails].
+     * Internally a no-op when those extras are absent, so it is safe to call on every
+     * onCreate / onNewIntent unconditionally.
+     */
+    private fun fireTapTrackingIfAny(incoming: Intent?) {
+        if (incoming == null) return
+        Messaging.handleNotificationResponse(incoming, /* applicationOpened = */ true, /* customActionId = */ null)
     }
 
     private fun requestNotificationPermission() {

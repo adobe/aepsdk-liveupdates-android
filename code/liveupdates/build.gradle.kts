@@ -43,10 +43,17 @@ dependencies {
     // AEP extension registration and Event Hub — sourced from mavenLocal at 3.8.0
     implementation("com.adobe.marketing.mobile:core:$mavenCoreVersion")
 
-    // Messaging — required for LiveUpdateHandler interface, MessagingPushPayload,
-    // Messaging.setLiveUpdateHandler. Sourced from mavenLocal at 3.10.0.
+    // Messaging — required for ILiveUpdateHandler interface, Messaging.setLiveUpdateHandler,
+    // MessagingConstants. Sourced from mavenLocal at 3.10.0.
     implementation("com.adobe.marketing.mobile:messaging:$mavenMessagingVersion")
 
     // Edge Network for Live Update lifecycle telemetry
     implementation("com.adobe.marketing.mobile:edge:$mavenEdgeVersion")
+
+    // Firebase Messaging — needed for the RemoteMessage type referenced in
+    // ILiveUpdateHandler.handleLiveUpdatePush(...) and in LiveUpdatePayload.parse(...).
+    // Marked compileOnly to match Messaging's pattern: the consuming app provides
+    // firebase-messaging on the runtime classpath; the SDK only needs the type at
+    // compile time.
+    compileOnly("com.google.firebase:firebase-messaging:23.4.1")
 }

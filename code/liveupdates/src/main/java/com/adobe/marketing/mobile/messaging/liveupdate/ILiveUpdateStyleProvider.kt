@@ -12,20 +12,22 @@
 package com.adobe.marketing.mobile.messaging.liveupdate
 
 import androidx.core.app.NotificationCompat
-import com.adobe.marketing.mobile.MessagingPushPayload
 
 /**
  * App-side hook for Live Update visual styling. Returns the [NotificationCompat.Style] to
  * apply to this push — `ProgressStyle` on API 36+, `MetricStyle` on API 37+, or any future
- * promotion-eligible style. Returning `null` causes [LiveUpdateRenderer] to decline the push;
- * Messaging then renders it via its default path.
+ * promotion-eligible style.
  *
- * The provider reads everything it needs from the payload directly — template type via
- * `payload.liveUpdate?.templateType`, dynamic state via `payload.liveUpdate?.contentState`,
- * etc. The SDK does not pre-parse or pre-route this for the provider.
+ * Returning `null` causes [LiveUpdateHandlerImpl] to drop the push with a warning log; the
+ * SDK does not fall back to any default style.
+ *
+ * The provider reads everything it needs from [payload] directly — for routing, the app
+ * may read its own template key from `payload.rawEnvelope` (e.g. `template_type`, or any
+ * other custom key the app chose). The SDK does NOT enforce any naming convention here.
+ * Dynamic state lives at `payload.contentState`.
  *
  * Invoked on the FCM background thread; do not perform long-running work.
  */
-fun interface LiveUpdateStyleProvider {
-    fun provideStyle(payload: MessagingPushPayload): NotificationCompat.Style?
+fun interface ILiveUpdateStyleProvider {
+    fun provideStyle(payload: LiveUpdatePayload): NotificationCompat.Style?
 }
