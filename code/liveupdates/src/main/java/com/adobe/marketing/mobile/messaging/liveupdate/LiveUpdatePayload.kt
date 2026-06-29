@@ -21,8 +21,9 @@ import org.json.JSONObject
 /**
  * Parsed Live Update push payload, decoupled from Messaging's [com.adobe.marketing.mobile.MessagingPushPayload].
  *
- * Exposes the SDK-canonical envelope fields the renderer applies to [androidx.core.app.NotificationCompat.Builder]
- * directly, plus a [rawEnvelope] escape hatch for app-defined keys the SDK does NOT interpret.
+ * Every envelope field the SDK or the sample app reads is parsed into a typed property here.
+ * No raw `JSONObject` or `data: Map` is retained - if a new field is needed, add it as a
+ * first-class property and parse it in [parse].
  *
  * Construct via [parse]; never instantiate directly.
  *
@@ -50,18 +51,15 @@ class LiveUpdatePayload private constructor(
     val actionUri: String?,
     val actionButtons: JSONArray?,
 
-    // Generic escape hatch - StyleProvider/app reads template_type, topic_name,
-    // or any custom key from here. SDK never switches on or validates these.
-    val rawEnvelope: JSONObject,
+    // `topicName` rides through to the tracking dispatch as
+    // pushChannelContext.liveActivity.channelID. The StyleProvider does NOT read it.
+    val topicName: String?,
 
     // Parsed AJO XDM tracking block from data['_xdm']. Opaque to the SDK; passed through
     // to Edge as-is in the Live Update event tracking dispatch so AJO server-side reporting
     // can correlate via messageExecutionID / campaignID / etc. Null when '_xdm' is absent
     // or unparseable.
-    val xdm: JSONObject?,
-
-    // Untouched FCM data map - useful for tracking dispatch and correlation.
-    val rawData: Map<String, String>
+    val xdm: JSONObject?
 ) {
     companion object {
         private const val SELF_TAG = "LiveUpdatePayload"
@@ -80,6 +78,7 @@ class LiveUpdatePayload private constructor(
         private const val KEY_ACTION_TYPE = "action_type"
         private const val KEY_ACTION_URI = "action_uri"
         private const val KEY_ACTION_BUTTONS = "action_buttons"
+        private const val KEY_TOPIC_NAME = "topic_name"
 
         // FCM data map key for the XDM passthrough block.
         private const val DATA_KEY_XDM = "_xdm"
@@ -152,9 +151,8 @@ class LiveUpdatePayload private constructor(
                 actionType = obj.optString(KEY_ACTION_TYPE).takeIf { it.isNotEmpty() },
                 actionUri = obj.optString(KEY_ACTION_URI).takeIf { it.isNotEmpty() },
                 actionButtons = obj.optJSONArray(KEY_ACTION_BUTTONS),
-                rawEnvelope = obj,
-                xdm = xdm,
-                rawData = message.data
+                topicName = obj.optString(KEY_TOPIC_NAME).takeIf { it.isNotEmpty() },
+                xdm = xdm
             )
         }
 

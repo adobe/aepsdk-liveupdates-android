@@ -36,8 +36,6 @@ class SampleLiveUpdateStyleProvider : ILiveUpdateStyleProvider {
         val state = payload.contentState
         val templateType = state?.optString("custom_key_template_type")
             ?.takeIf { it.isNotEmpty() }
-            ?: payload.rawEnvelope.optString("template_type")
-                .takeIf { it.isNotEmpty() }
             ?: "standard"
 
         return when (templateType) {

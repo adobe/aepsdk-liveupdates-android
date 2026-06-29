@@ -11,6 +11,7 @@
 
 package com.adobe.marketing.mobile.liveupdatessample
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -18,8 +19,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.util.Log
-import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
 import com.adobe.marketing.mobile.Messaging
 import com.adobe.marketing.mobile.MobileCore
 import com.adobe.marketing.mobile.messaging.MessagingService
@@ -27,202 +26,226 @@ import com.adobe.marketing.mobile.messaging.NotificationInteractionReceiver
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdates
 import com.google.firebase.messaging.FirebaseMessagingService
+
+// (LiveUpdates.trackLiveUpdateEvent stays imported for the Pattern 3 football branch.)
 import com.google.firebase.messaging.RemoteMessage
 
 /**
- * Reference implementation of the **three integration patterns** for AEP push handling
- * when the app owns its own [FirebaseMessagingService] instead of using the auto-registered
- * [com.adobe.marketing.mobile.messaging.MessagingService].
+ * Reference implementation of the three integration patterns for AEP push handling when
+ * the app owns its own [FirebaseMessagingService].
  *
- * **The three patterns demonstrated:**
- *  - **Pattern 2 (Mixed / Auto-handled)**: `LiveUpdates.handleLiveUpdatePush(...)` parses,
- *    builds, posts, tracks, and fires the listener - everything automatic. The default
- *    branch when `MANUAL_LIVE_UPDATE_MODE` is `false`.
- *  - **Pattern 3 (Manual)**: the app parses the payload itself, builds its own
- *    [NotificationCompat.Builder] from envelope fields, posts via
- *    [NotificationManagerCompat.notify], and explicitly calls
- *    [LiveUpdates.trackLiveUpdateEvent] to fire Live Update event tracking + invoke any
- *    registered [com.adobe.marketing.mobile.messaging.liveupdate.ILiveUpdateListener].
- *    Activated by flipping `MANUAL_LIVE_UPDATE_MODE` to `true`.
- *  - **Standard AJO push fallthrough**: for non-Live-Update AJO pushes,
- *    [MessagingService.handleRemoteMessage] handles everything via the standard pipeline.
+ * Routing in this sample:
+ *  - **Football scoreboard** (`content_state.custom_key_template_type == "metric"`):
+ *    Pattern 3 (Manual) using platform `Notification.MetricStyle` accessed via reflection
+ *    (the class is new in Android 17 / API 37 and not yet in androidx.core nor in the
+ *    AGP 8.9.1-supported compileSdk; reflection is the pragmatic workaround until either
+ *    AGP bumps to support compileSdk 37 or AndroidX ships a NotificationCompat.MetricStyle
+ *    backport). Runtime gate: API 37+ only.
+ *  - **Flight / journey** (`template_type == "progress"`) and anything else: Pattern 2
+ *    (Mixed) - `LiveUpdates.handleLiveUpdatePush(...)` lets the SDK render via
+ *    `NotificationCompat.ProgressStyle`.
+ *  - **Standard AJO push** (non-Live-Update): `MessagingService.handleRemoteMessage`.
  *
- * **Not registered in AndroidManifest.xml by default.** This file exists as a code
- * reference; the test app keeps the Messaging auto-service registered so the
- * existing `fcm.sh` flow keeps working. To activate this service, swap the manifest
- * `<service android:name="com.adobe.marketing.mobile.messaging.MessagingService" .../>`
- * for `<service android:name=".SampleNotificationService" .../>` with the same FCM
- * intent-filter.
+ * Registered in the AndroidManifest as the FCM intake, replacing Messaging's auto-service
+ * so the metric routing branch can fire.
  */
 class SampleNotificationService : FirebaseMessagingService() {
 
-    /**
-     * Flip to `true` to demonstrate Pattern 3 (manual) for Live Updates. Leave `false` to
-     * use Pattern 2 (mixed) where the SDK does the rendering. Standard AJO pushes always
-     * go through `MessagingService.handleRemoteMessage` regardless of this flag.
-     */
-    private val MANUAL_LIVE_UPDATE_MODE = false
-
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        // Forward the new FCM token to the AEP SDK so AJO can target this device.
         MobileCore.setPushIdentifier(token)
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
 
-        // region ===== Live Update routing =====
+        // Peel off the football MetricStyle case BEFORE the standard AJO routing - this is
+        // the only Live Update flow that needs Pattern 3 (manual) because platform
+        // MetricStyle isn't accessible through the SDK's NotificationCompat-based renderer
+        // yet. Everything else falls through to MessagingService.handleRemoteMessage below.
         if (LiveUpdatePayload.isLiveUpdate(message)) {
-            if (MANUAL_LIVE_UPDATE_MODE) {
-                handleLiveUpdateManually(message) // Pattern 3
-            } else {
-                LiveUpdates.handleLiveUpdatePush(this, message) // Pattern 2
+            val payload = LiveUpdatePayload.parse(message)
+            val templateType =
+                payload?.contentState?.optString("custom_key_template_type", "") ?: ""
+            if (templateType == "metric" && Build.VERSION.SDK_INT >= 37 && payload != null) {
+                handleFootballMetricStyle(payload, message)
+                return
             }
-            return
         }
-        // endregion
 
-        // region ===== Standard AJO push (auto display + tracking) =====
-        if (MessagingService.handleRemoteMessage(this, message)) {
-            return
-        }
-        // endregion
+        // Single entry point covers both Live Updates (auto-dispatched to the registered
+        // ILiveUpdateHandler when adb_liveupdate_data is present) AND standard AJO push.
+        // No need for a separate LiveUpdates.handleLiveUpdatePush call.
+        if (MessagingService.handleRemoteMessage(this, message)) return
 
-        // region ===== Non-AEP push =====
-        // App-specific handling for any other push types goes here. Demo has nothing.
-        // endregion
+        // Non-AEP pushes would be handled here.
     }
 
     // ============================================================================
-    // Pattern 3 (Manual) - parse, build, post, track everything yourself.
+    // Pattern 3 (Manual) - football scoreboard via platform Notification.MetricStyle.
     // ============================================================================
     //
-    // Layout mirrors the standard-push manual demo in the messaging sample's
-    // NotificationService.kt: read fields off the parsed payload, set up tap and
-    // dismiss PendingIntents wired through Messaging's tracker activity / receiver
-    // so AJO tap + dismiss tracking flows automatically, then call the new
-    // LiveUpdates.trackLiveUpdateEvent to fire the Live Update start/update/end
-    // event and invoke any registered ILiveUpdateListener.
-    private fun handleLiveUpdateManually(message: RemoteMessage) {
-        // 1. Parse the envelope. Returns null when any required field is missing
-        //    (notification_id, notification_channel_id, event_type, title).
-        val payload = LiveUpdatePayload.parse(message)
-        if (payload == null) {
-            Log.w(TAG, "Live Update payload failed to parse; dropping.")
+    // MetricStyle landed in Android 17 (API 37) but is not yet in AndroidX's
+    // NotificationCompat. To avoid bumping compileSdk past what AGP 8.9.1 understands,
+    // we reach for the platform classes by name via reflection. Only fires on API 37+
+    // (gated in onMessageReceived above).
+    private fun handleFootballMetricStyle(payload: LiveUpdatePayload, message: RemoteMessage) {
+        val state = payload.contentState ?: run {
+            Log.w(TAG, "Football MetricStyle push has no content_state; dropping.")
+            return
+        }
+        val homeTeam = state.optString("custom_key_home_team", "Home")
+        val awayTeam = state.optString("custom_key_away_team", "Away")
+        val homeScore = state.optInt("custom_key_home_score", 0)
+        val awayScore = state.optInt("custom_key_away_score", 0)
+        val matchTime = state.optString("custom_key_match_time", "")
+
+        ensureMetricChannel(payload.channelId)
+
+        val tapPi = buildTapPendingIntent(payload, message)
+        val dismissPi = buildDismissPendingIntent(payload, message)
+
+        val metricStyle = buildMetricStyleViaReflection(
+            homeTeam = homeTeam,
+            awayTeam = awayTeam,
+            homeScore = homeScore,
+            awayScore = awayScore,
+            matchTime = matchTime
+        )
+
+        if (metricStyle == null) {
+            Log.w(TAG, "MetricStyle unavailable on this device (need API 37+); dropping football chip.")
             return
         }
 
-        // 2. Register the NotificationChannel from the envelope if it doesn't exist yet.
-        //    Live Update promotion requires IMPORTANCE_HIGH; channel must exist before notify.
-        ensureChannel(payload.channelId, "Live Updates")
-
-        // 3. Build tap and dismiss PendingIntents. Both carry the AJO tracking extras
-        //    injected by Messaging.addPushTrackingDetails; the receiving Activity (MainActivity)
-        //    calls Messaging.handleNotificationResponse in onCreate / onNewIntent to fire
-        //    tap tracking. Dismiss tracking fires automatically through the broadcast receiver.
-        val tapIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            message.messageId?.let { Messaging.addPushTrackingDetails(this, it, message.data) }
-        }
-        val tapPendingIntent = PendingIntent.getActivity(
-            this,
-            payload.notificationId.hashCode(),
-            tapIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val deleteIntent = Intent(applicationContext, NotificationInteractionReceiver::class.java).apply {
-            message.messageId?.let { Messaging.addPushTrackingDetails(this, it, message.data) }
-        }
-        val deletePendingIntent = PendingIntent.getBroadcast(
-            this,
-            payload.notificationId.hashCode(),
-            deleteIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        // 4. Build the notification. Everything below is the customer's choice -
-        //    the SDK does not impose a builder shape in manual mode.
-        val builder = NotificationCompat.Builder(this, payload.channelId)
+        @Suppress("DEPRECATION")
+        val builder = Notification.Builder(this, payload.channelId)
             .setSmallIcon(resolveSmallIcon())
-            .setContentTitle(payload.title)
-            .setContentText(payload.body)
-            .setStyle(buildStyleFromPayload(payload))
+            .setContentTitle("$homeTeam vs $awayTeam")
+            .setContentText("$homeScore - $awayScore   ${matchTime.ifEmpty { "live" }}")
+            .setStyle(metricStyle)
             .setOngoing(true)
-            .setRequestPromotedOngoing(true) // API 36+ chip promotion (no-op below)
-            .setPriority(mapPriority(payload.priority))
-            .setContentIntent(tapPendingIntent)
-            .setDeleteIntent(deletePendingIntent)
-            .setAutoCancel(false) // chip is ongoing; do not auto-cancel on tap
+            .setColorized(true)
+            .setColor(LIVERPOOL_RED)
+            .setContentIntent(tapPi)
+            .setDeleteIntent(dismissPi)
+            .setOnlyAlertOnce(true)
 
-        payload.criticalText?.let { builder.setShortCriticalText(it) }
+        // setRequestPromotedOngoing was added in API 36 - safe to call via reflection
+        // to avoid a compile-time NoSuchMethodError if compileSdk is below that.
+        runCatching {
+            Notification.Builder::class.java
+                .getMethod("setRequestPromotedOngoing", Boolean::class.javaPrimitiveType)
+                .invoke(builder, true)
+        }
+
+        payload.criticalText?.let { critical ->
+            runCatching {
+                Notification.Builder::class.java
+                    .getMethod("setShortCriticalText", CharSequence::class.java)
+                    .invoke(builder, critical)
+            }
+        }
         payload.whenMillis?.let { builder.setWhen(it).setShowWhen(true) }
         payload.dismissAfterSeconds?.takeIf { it > 0L }?.let {
             builder.setTimeoutAfter(it * 1000L)
         }
 
-        // 5. Post the notification under notification_id.hashCode() so subsequent pushes
-        //    with the same notification_id update this chip in place.
-        NotificationManagerCompat.from(this)
-            .notify(payload.notificationId.hashCode(), builder.build())
+        getSystemService(NotificationManager::class.java)
+            ?.notify(payload.notificationId.hashCode(), builder.build())
 
-        // 6. Fire Live Update event tracking + invoke any registered ILiveUpdateListener.
-        //    This is the manual-mode equivalent of what LiveUpdateHandlerImpl does
-        //    automatically for Patterns 1 and 2 right after notify(). The SDK reads
-        //    event_type from the envelope, dispatches the appropriate XDM event through
-        //    Edge to AJO, and invokes onStart / onUpdate / onEnd on the listener.
         LiveUpdates.trackLiveUpdateEvent(this, message)
     }
 
     /**
-     * Picks a [NotificationCompat.Style] for the chip based on the parsed envelope. This is
-     * customer code in Pattern 3 - the SDK doesn't dictate the style. Here we mirror
-     * [SampleLiveUpdateStyleProvider]: read `template_type` from the raw envelope and
-     * `custom_key_journey_progress` from `content_state`.
+     * Builds a platform `Notification.MetricStyle` (API 37+) via reflection. Returns null
+     * if any of the required classes are absent from this device's runtime (i.e. API < 37
+     * or a stripped runtime). Three metrics are added: home score, away score, and match
+     * time text. `setCriticalMetric(0)` marks the home score as the chip-visible headline.
      */
-    private fun buildStyleFromPayload(payload: LiveUpdatePayload): NotificationCompat.Style {
-        val templateType = payload.rawEnvelope.optString("template_type", "standard")
-        val state = payload.contentState
-        return when (templateType) {
-            "progress" -> {
-                val progress = state?.optInt("custom_key_journey_progress", 0) ?: 0
-                NotificationCompat.ProgressStyle()
-                    .setProgress(progress)
-                    .setStyledByProgress(true)
-            }
-            "big_text" -> NotificationCompat.BigTextStyle().bigText(payload.body)
-            else -> NotificationCompat.BigTextStyle().bigText(payload.body)
+    private fun buildMetricStyleViaReflection(
+        homeTeam: String,
+        awayTeam: String,
+        homeScore: Int,
+        awayScore: Int,
+        matchTime: String
+    ): Notification.Style? {
+        return try {
+            val metricStyleClass = Class.forName("android.app.Notification\$MetricStyle")
+            val metricClass = Class.forName("android.app.Notification\$Metric")
+            val fixedIntClass = Class.forName("android.app.Notification\$Metric\$FixedInt")
+            val fixedTextClass = Class.forName("android.app.Notification\$Metric\$FixedText")
+            val metricValueClass = Class.forName("android.app.Notification\$Metric\$MetricValue")
+
+            // FixedInt(int value)
+            val fixedIntCtor = fixedIntClass.getConstructor(Int::class.javaPrimitiveType)
+            // FixedText(CharSequence value)
+            val fixedTextCtor = fixedTextClass.getConstructor(CharSequence::class.java)
+            // Metric(MetricValue value, CharSequence label)
+            val metricCtor = metricClass.getConstructor(metricValueClass, CharSequence::class.java)
+
+            val homeMetric = metricCtor.newInstance(fixedIntCtor.newInstance(homeScore), homeTeam as CharSequence)
+            val awayMetric = metricCtor.newInstance(fixedIntCtor.newInstance(awayScore), awayTeam as CharSequence)
+            val timeMetric = metricCtor.newInstance(fixedTextCtor.newInstance(matchTime as CharSequence), "Time" as CharSequence)
+
+            val style = metricStyleClass.getConstructor().newInstance()
+            val addMetric = metricStyleClass.getMethod("addMetric", metricClass)
+            addMetric.invoke(style, homeMetric)
+            addMetric.invoke(style, awayMetric)
+            addMetric.invoke(style, timeMetric)
+
+            // setCriticalMetric(int index) - home score is the chip headline metric
+            metricStyleClass.getMethod("setCriticalMetric", Int::class.javaPrimitiveType)
+                .invoke(style, 0)
+
+            style as Notification.Style
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to build Notification.MetricStyle via reflection: ${e.javaClass.simpleName}: ${e.message}")
+            null
         }
     }
 
-    private fun ensureChannel(channelId: String, channelName: String) {
+    private fun buildTapPendingIntent(payload: LiveUpdatePayload, message: RemoteMessage): PendingIntent {
+        val tapIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            message.messageId?.let { Messaging.addPushTrackingDetails(this, it, message.data) }
+        }
+        return PendingIntent.getActivity(
+            this, payload.notificationId.hashCode(), tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    private fun buildDismissPendingIntent(payload: LiveUpdatePayload, message: RemoteMessage): PendingIntent {
+        val dismissIntent = Intent(applicationContext, NotificationInteractionReceiver::class.java).apply {
+            message.messageId?.let { Messaging.addPushTrackingDetails(this, it, message.data) }
+        }
+        return PendingIntent.getBroadcast(
+            this, payload.notificationId.hashCode(), dismissIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    private fun ensureMetricChannel(channelId: String) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = getSystemService(NotificationManager::class.java) ?: return
         if (nm.getNotificationChannel(channelId) != null) return
         nm.createNotificationChannel(
-            NotificationChannel(channelId, channelName, NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "AJO Live Update chips"
+            NotificationChannel(channelId, "Live Updates", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Status-bar chips for AJO Live Updates"
+                setSound(null, null)
+                enableVibration(false)
             }
         )
     }
 
-    /** Prefer the `MobileCore`-configured icon; fall back to the app's launcher icon. */
     private fun resolveSmallIcon(): Int {
         val configured = MobileCore.getSmallIconResourceID()
         return if (configured > 0) configured else applicationInfo.icon
     }
 
-    /** Maps the envelope's string priority to a `NotificationCompat.PRIORITY_*` int. */
-    private fun mapPriority(priority: String?): Int = when (priority) {
-        "PRIORITY_MAX" -> NotificationCompat.PRIORITY_MAX
-        "PRIORITY_HIGH" -> NotificationCompat.PRIORITY_HIGH
-        "PRIORITY_LOW" -> NotificationCompat.PRIORITY_LOW
-        "PRIORITY_MIN" -> NotificationCompat.PRIORITY_MIN
-        else -> NotificationCompat.PRIORITY_DEFAULT
-    }
-
     private companion object {
         const val TAG = "SampleNotificationService"
+        const val LIVERPOOL_RED: Int = 0xFFC8102E.toInt()
     }
 }

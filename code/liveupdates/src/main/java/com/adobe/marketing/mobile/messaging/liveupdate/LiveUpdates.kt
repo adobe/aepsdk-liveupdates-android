@@ -16,7 +16,6 @@ import com.adobe.marketing.mobile.AdobeCallback
 import com.adobe.marketing.mobile.Event
 import com.adobe.marketing.mobile.EventSource
 import com.adobe.marketing.mobile.EventType
-import com.adobe.marketing.mobile.Messaging
 import com.adobe.marketing.mobile.MobileCore
 import com.adobe.marketing.mobile.services.Log
 import com.google.firebase.messaging.FirebaseMessaging
@@ -30,58 +29,51 @@ import com.google.firebase.messaging.RemoteMessage
  * inbound events. See the design proposal wiki for the rationale.
  *
  * Surface:
- *  - [handleLiveUpdatePush]: Pattern 2 (mixed) entry point for apps with their own [com.google.firebase.messaging.FirebaseMessagingService].
  *  - [setLiveUpdateListener] / [getLiveUpdateListener]: register a hook for start/update/end Live Update events.
  *  - [trackLiveUpdateEvent]: Pattern 3 (manual) entry point that fires Live Update event tracking + listener invocation when the app builds and posts the notification itself.
  *  - [subscribeToTopic] / [unsubscribeFromTopic] / [getSubscribedTopics]: FCM topic subscription helpers for the broadcast use case.
+ *
+ * Pattern 2 (mixed) integration does NOT need an entry point on this facade. Apps with their
+ * own [com.google.firebase.messaging.FirebaseMessagingService] call
+ * `MessagingService.handleRemoteMessage(context, message)` directly - that method already
+ * detects Live Updates by the `adb_liveupdate_data` key and dispatches to the registered
+ * [com.adobe.marketing.mobile.ILiveUpdateHandler].
  */
 object LiveUpdates {
 
     private const val SELF_TAG = "LiveUpdates"
     private const val EXTENSION_VERSION = "1.0.0"
 
-    // Event dispatch constants - shape mirrors Messaging's push tracking event.
+    // Event dispatch constants.
     private const val EVENT_NAME_LIVE_UPDATE_TRACKING = "Live Update Event Tracking"
     private const val EVENT_DATA_KEY_XDM = "xdm"
-    private const val EVENT_DATA_KEY_DATA = "data"
-    private const val DATA_KEY_LIVE_UPDATE_EVENT = "liveUpdateEvent"
-    private const val DATA_KEY_NOTIFICATION_ID = "notificationId"
-    private const val DATA_KEY_PUSH_DATA = "pushData"
+
+    // XDM schema field names - match the canonical AJO Push Tracking Experience Event Schema,
+    // which is the same schema the iOS Live Activities tracking flow populates in production.
+    private const val XDM_KEY_EVENT_TYPE = "eventType"
+    private const val XDM_VALUE_PUSH_TRACKING_APPLICATION_OPENED = "pushTracking.applicationOpened"
+    private const val XDM_KEY_PUSH_NOTIFICATION_TRACKING = "pushNotificationTracking"
+    private const val XDM_KEY_PUSH_PROVIDER = "pushProvider"
+    private const val XDM_KEY_PUSH_PROVIDER_MESSAGE_ID = "pushProviderMessageID"
+    private const val XDM_KEY_EXPERIENCE = "_experience"
+    private const val XDM_KEY_CUSTOMER_JOURNEY_MANAGEMENT = "customerJourneyManagement"
+    private const val XDM_KEY_MIXINS = "mixins"
+    private const val XDM_KEY_CJM = "cjm"
+    private const val XDM_KEY_MESSAGE_PROFILE = "messageProfile"
+    private const val XDM_KEY_CHANNEL = "channel"
+    private const val XDM_KEY_ID = "_id"
+    private const val XDM_VALUE_PUSH_CHANNEL_ID = "https://ns.adobe.com/xdm/channels/push"
+    private const val XDM_KEY_PUSH_CHANNEL_CONTEXT = "pushChannelContext"
+    private const val XDM_KEY_PLATFORM = "platform"
+    private const val XDM_VALUE_PLATFORM_FCM = "fcm"
+    private const val XDM_KEY_LIVE_ACTIVITY = "liveActivity"
+    private const val XDM_KEY_LIVE_ACTIVITY_ID = "liveActivityID"
+    private const val XDM_KEY_LIVE_ACTIVITY_CHANNEL_ID = "channelID"
+    private const val XDM_KEY_LIVE_ACTIVITY_EVENT = "event"
 
     /** Returns the SDK version string. */
     @JvmStatic
     fun extensionVersion(): String = EXTENSION_VERSION
-
-    // ---------- Pattern 2: mixed-mode entry point ----------
-
-    /**
-     * Handles a [RemoteMessage] as a Live Update push. Use this from inside a custom
-     * [com.google.firebase.messaging.FirebaseMessagingService.onMessageReceived] when the app
-     * wants to route Live Updates through the SDK while keeping its own service for the rest
-     * of its push traffic (Pattern 2 - mixed mode).
-     *
-     * @return `true` if [message] is a Live Update and was either dispatched to the
-     *   registered handler or dropped because no handler is registered. The caller should
-     *   stop processing. `false` if [message] is not a Live Update (caller should try its
-     *   other handlers, e.g. `MessagingService.handleRemoteMessage`).
-     */
-    @JvmStatic
-    fun handleLiveUpdatePush(context: Context, message: RemoteMessage): Boolean {
-        if (!LiveUpdatePayload.isLiveUpdate(message)) {
-            return false
-        }
-        val handler = Messaging.getLiveUpdateHandler()
-        if (handler == null) {
-            Log.warning(
-                SELF_TAG, SELF_TAG,
-                "Received a Live Update push but no ILiveUpdateHandler is registered. " +
-                    "Dropping. Register a handler via Messaging.setLiveUpdateHandler(...)."
-            )
-            return true
-        }
-        handler.handleLiveUpdatePush(context, message)
-        return true
-    }
 
     // ---------- Listener registration ----------
 
@@ -189,19 +181,33 @@ object LiveUpdates {
     // ---------- internal helpers (visible to LiveUpdateHandlerImpl) ----------
 
     /**
-     * Dispatches a `MobileCore.dispatchEvent` carrying the Live Update event marker, the
-     * parsed AJO XDM block (with messageExecutionID / campaignID etc. preserved), and the
-     * raw push data. Edge picks this up and forwards to AJO. Skips dispatch (with a debug
-     * log) if `event_type` is not one of `start` / `update` / `end`.
+     * Dispatches an Edge event carrying the Live Update lifecycle tracking payload. The XDM
+     * shape matches the canonical AJO Push Tracking Experience Event Schema (the same dataset
+     * the iOS Live Activities tracking flow writes into today), so AJO server-side reporting
+     * picks the events up without any new schema work. Skips dispatch (with a debug log) if
+     * `event_type` is not one of `start` / `update` / `end`.
      *
-     * Event data shape:
+     * Outbound XDM shape:
      * ```
      * {
-     *   "xdm":  { ... parsed _xdm passthrough from the FCM data map ... },
-     *   "data": {
-     *     "liveUpdateEvent": "start" | "update" | "end",
-     *     "notificationId":  "...",
-     *     "pushData":        { ... raw FCM data map ... }
+     *   "eventType": "pushTracking.applicationOpened",
+     *   "pushNotificationTracking": {
+     *     "pushProvider":          "fcm",
+     *     "pushProviderMessageID": "<notification_id>"
+     *   },
+     *   "_experience": {
+     *     "customerJourneyManagement": {
+     *       (passthrough from incoming _xdm: messageExecution, decisioning, etc.)
+     *       "messageProfile":      { "channel": { "_id": "https://ns.adobe.com/xdm/channels/push" } },
+     *       "pushChannelContext":  {
+     *         "platform":     "fcm",
+     *         "liveActivity": {
+     *           "liveActivityID": "<notification_id>",
+     *           "channelID":      "<topic_name>",
+     *           "event":          "start" | "update" | "end"
+     *         }
+     *       }
+     *     }
      *   }
      * }
      * ```
@@ -218,22 +224,93 @@ object LiveUpdates {
             )
             return
         }
-        val xdmMap = payload.xdm?.let { jsonObjectToMap(it) } ?: emptyMap<String, Any?>()
-        val dataMap = mapOf<String, Any?>(
-            DATA_KEY_LIVE_UPDATE_EVENT to eventType,
-            DATA_KEY_NOTIFICATION_ID to payload.notificationId,
-            DATA_KEY_PUSH_DATA to payload.rawData
-        )
-        val eventData = mapOf<String, Any?>(
-            EVENT_DATA_KEY_XDM to xdmMap,
-            EVENT_DATA_KEY_DATA to dataMap
-        )
+        val xdmMap = buildLiveActivityTrackingXdm(payload)
+        val eventData = mapOf<String, Any?>(EVENT_DATA_KEY_XDM to xdmMap)
+        // EventType.EDGE + REQUEST_CONTENT is the contract the Edge extension listens for.
+        // Edge picks up this event from the Event Hub, posts it to the AJO Edge endpoint
+        // with ECID correlation intact, and the XDM (messageExecutionID / campaignID etc.)
+        // flows through unchanged so server-side AJO reporting can correlate.
         val event = Event.Builder(
             EVENT_NAME_LIVE_UPDATE_TRACKING,
-            EventType.MESSAGING,
+            EventType.EDGE,
             EventSource.REQUEST_CONTENT
         ).setEventData(eventData).build()
         MobileCore.dispatchEvent(event)
+    }
+
+    /**
+     * Constructs the outbound XDM map for a Live Update lifecycle tracking event. Mirrors the
+     * shape Messaging's `MessagingExtension.getXdmData` + `addXDMData` produce for standard
+     * push tracking, and adds the iOS-parity `pushChannelContext.liveActivity` block carrying
+     * the Live Update id, topic name, and lifecycle phase. See class-level KDoc for the full
+     * field list and the Push Tracking Experience Event Schema reference.
+     */
+    private fun buildLiveActivityTrackingXdm(payload: LiveUpdatePayload): Map<String, Any?> {
+        val xdmMap = mutableMapOf<String, Any?>()
+
+        // 1. Top-level eventType. Same canonical value Messaging uses for standard push
+        //    tracking; the Live Update lifecycle phase is carried in
+        //    pushChannelContext.liveActivity.event below.
+        xdmMap[XDM_KEY_EVENT_TYPE] = XDM_VALUE_PUSH_TRACKING_APPLICATION_OPENED
+
+        // 2. pushNotificationTracking marker - identifies FCM as the push provider for this
+        //    event, identical to standard push tracking events.
+        xdmMap[XDM_KEY_PUSH_NOTIFICATION_TRACKING] = mapOf<String, Any?>(
+            XDM_KEY_PUSH_PROVIDER to XDM_VALUE_PLATFORM_FCM,
+            XDM_KEY_PUSH_PROVIDER_MESSAGE_ID to payload.notificationId
+        )
+
+        // 3. Merge the incoming _xdm passthrough from the server. AJO nests its mixins under
+        //    "mixins" (or "cjm" as an alias) for schema composition; flatten to root before
+        //    Edge sees it. Mirrors MessagingExtension.addXDMData.
+        val incomingXdm = payload.xdm?.let { jsonObjectToMap(it) }
+        if (incomingXdm != null) {
+            @Suppress("UNCHECKED_CAST")
+            val mixinsLayer = (incomingXdm[XDM_KEY_MIXINS] as? Map<String, Any?>)
+                ?: (incomingXdm[XDM_KEY_CJM] as? Map<String, Any?>)
+            if (mixinsLayer != null) {
+                xdmMap.putAll(mixinsLayer)
+            } else {
+                // Server did not use a wrapper; treat root fields as already-flattened.
+                xdmMap.putAll(incomingXdm.filterKeys { it != XDM_KEY_MIXINS && it != XDM_KEY_CJM })
+            }
+        }
+
+        // 4. Find or build _experience.customerJourneyManagement, then add the standard
+        //    Messaging push profile + the iOS-parity pushChannelContext.liveActivity block.
+        @Suppress("UNCHECKED_CAST")
+        val experience = (xdmMap[XDM_KEY_EXPERIENCE] as? Map<String, Any?>)?.toMutableMap()
+            ?: mutableMapOf()
+        @Suppress("UNCHECKED_CAST")
+        val cjm = (experience[XDM_KEY_CUSTOMER_JOURNEY_MANAGEMENT] as? Map<String, Any?>)?.toMutableMap()
+            ?: mutableMapOf()
+
+        // messageProfile.channel = push (same as Messaging's MESSAGE_PROFILE_JSON constant)
+        @Suppress("UNCHECKED_CAST")
+        val messageProfile = (cjm[XDM_KEY_MESSAGE_PROFILE] as? Map<String, Any?>)?.toMutableMap()
+            ?: mutableMapOf()
+        if (!messageProfile.containsKey(XDM_KEY_CHANNEL)) {
+            messageProfile[XDM_KEY_CHANNEL] = mapOf<String, Any?>(
+                XDM_KEY_ID to XDM_VALUE_PUSH_CHANNEL_ID
+            )
+        }
+        cjm[XDM_KEY_MESSAGE_PROFILE] = messageProfile
+
+        // pushChannelContext.liveActivity - the new bit for Live Updates. Mirrors the iOS
+        // Live Activities tracking shape that AJO already understands in production.
+        cjm[XDM_KEY_PUSH_CHANNEL_CONTEXT] = mapOf<String, Any?>(
+            XDM_KEY_PLATFORM to XDM_VALUE_PLATFORM_FCM,
+            XDM_KEY_LIVE_ACTIVITY to mapOf<String, Any?>(
+                XDM_KEY_LIVE_ACTIVITY_ID to payload.notificationId,
+                XDM_KEY_LIVE_ACTIVITY_CHANNEL_ID to (payload.topicName ?: ""),
+                XDM_KEY_LIVE_ACTIVITY_EVENT to payload.eventType
+            )
+        )
+
+        experience[XDM_KEY_CUSTOMER_JOURNEY_MANAGEMENT] = cjm
+        xdmMap[XDM_KEY_EXPERIENCE] = experience
+
+        return xdmMap
     }
 
     /**

@@ -36,8 +36,11 @@
         </activity>
 
         <!--
-            Messaging SDK's FCM entry point. Receives push payloads and (for Live Updates)
-            delegates to the LiveUpdateHandler the Live Updates SDK registered.
+            App-owned FCM intake. Routes Live Updates with template_type=metric through
+            Pattern 3 manual mode + platform Notification.MetricStyle; routes everything
+            else to LiveUpdates.handleLiveUpdatePush (Pattern 2) or
+            MessagingService.handleRemoteMessage (standard AJO push). Replaces Messaging's
+            auto-service for FCM events.
         -->
         <service
             android:name="com.adobe.marketing.mobile.messaging.MessagingService"

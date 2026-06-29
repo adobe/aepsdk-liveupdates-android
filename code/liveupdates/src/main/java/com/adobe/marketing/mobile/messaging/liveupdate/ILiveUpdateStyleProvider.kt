@@ -21,10 +21,10 @@ import androidx.core.app.NotificationCompat
  * Returning `null` causes [LiveUpdateHandlerImpl] to drop the push with a warning log; the
  * SDK does not fall back to any default style.
  *
- * The provider reads everything it needs from [payload] directly — for routing, the app
- * may read its own template key from `payload.rawEnvelope` (e.g. `template_type`, or any
- * other custom key the app chose). The SDK does NOT enforce any naming convention here.
- * Dynamic state lives at `payload.contentState`.
+ * Design split: the envelope root carries SDK-canonical fields (parsed into typed properties
+ * on [LiveUpdatePayload]), while `content_state` carries app-defined dynamic state. The
+ * provider reads custom keys (e.g. `custom_key_template_type`, `custom_key_journey_progress`)
+ * from `payload.contentState` - the SDK does not interpret anything inside `content_state`.
  *
  * Invoked on the FCM background thread; do not perform long-running work.
  */
