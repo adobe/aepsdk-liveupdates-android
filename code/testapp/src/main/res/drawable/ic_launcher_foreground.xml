@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Notification chip pill -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M30,46 L78,46 A14,14 0 0 1 78,74 L30,74 A14,14 0 0 1 30,46 Z"/>
+    <!-- Live indicator dot -->
+    <path
+        android:fillColor="#FF4081"
+        android:pathData="M42,60 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0"/>
+    <!-- Content bars suggesting live data -->
+    <path
+        android:fillColor="#7B3FF2"
+        android:pathData="M56,57 L72,57 L72,61 L56,61 Z M56,63 L68,63 L68,67 L56,67 Z"/>
+</vector>
