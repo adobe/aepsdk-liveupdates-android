@@ -31,7 +31,7 @@ import com.google.firebase.messaging.RemoteMessage
  * Surface:
  *  - [setLiveUpdateListener] / [getLiveUpdateListener]: register a hook for start/update/end Live Update events.
  *  - [trackLiveUpdateEvent]: Pattern 3 (manual) entry point that fires Live Update event tracking + listener invocation when the app builds and posts the notification itself.
- *  - [subscribeToTopic] / [unsubscribeFromTopic] / [getSubscribedTopics]: FCM topic subscription helpers for the broadcast use case.
+ *  - [subscribeToTopic] / [unsubscribeFromTopic]: FCM topic subscription helpers for the broadcast use case.
  *
  * Pattern 2 (mixed) integration does NOT need an entry point on this facade. Apps with their
  * own [com.google.firebase.messaging.FirebaseMessagingService] call
@@ -155,20 +155,19 @@ object LiveUpdates {
 
     /**
      * Subscribes the device to an FCM topic so it can receive broadcast Live Updates. Thin
-     * wrapper around [FirebaseMessaging.subscribeToTopic]. Persists the subscription in
-     * SharedPreferences so [getSubscribedTopics] returns the correct set across launches.
+     * wrapper around [FirebaseMessaging.subscribeToTopic]; the SDK does not maintain a
+     * local record of subscriptions, so callers that need a persisted set should track it
+     * themselves.
      *
      * @param topic the FCM topic name (no `/topics/` prefix)
      * @param callback invoked with `true` on success, `false` on FCM failure; may be `null`
      */
     @JvmStatic
     @JvmOverloads
-    fun subscribeToTopic(context: Context, topic: String, callback: AdobeCallback<Boolean>? = null) {
+    fun subscribeToTopic(topic: String, callback: AdobeCallback<Boolean>? = null) {
         FirebaseMessaging.getInstance().subscribeToTopic(topic).addOnCompleteListener { task ->
             val success = task.isSuccessful
-            if (success) {
-                LiveUpdateTopicStore.addTopic(context, topic)
-            } else {
+            if (!success) {
                 Log.warning(
                     SELF_TAG, SELF_TAG,
                     "subscribeToTopic($topic) failed: ${task.exception?.localizedMessage}"
@@ -180,19 +179,17 @@ object LiveUpdates {
 
     /**
      * Unsubscribes the device from an FCM topic. Thin wrapper around
-     * [FirebaseMessaging.unsubscribeFromTopic]. Removes the topic from the persisted set.
+     * [FirebaseMessaging.unsubscribeFromTopic].
      *
      * @param topic the FCM topic name (no `/topics/` prefix)
      * @param callback invoked with `true` on success, `false` on FCM failure; may be `null`
      */
     @JvmStatic
     @JvmOverloads
-    fun unsubscribeFromTopic(context: Context, topic: String, callback: AdobeCallback<Boolean>? = null) {
+    fun unsubscribeFromTopic(topic: String, callback: AdobeCallback<Boolean>? = null) {
         FirebaseMessaging.getInstance().unsubscribeFromTopic(topic).addOnCompleteListener { task ->
             val success = task.isSuccessful
-            if (success) {
-                LiveUpdateTopicStore.removeTopic(context, topic)
-            } else {
+            if (!success) {
                 Log.warning(
                     SELF_TAG, SELF_TAG,
                     "unsubscribeFromTopic($topic) failed: ${task.exception?.localizedMessage}"
@@ -201,16 +198,6 @@ object LiveUpdates {
             callback?.call(success)
         }
     }
-
-    /**
-     * Returns the set of FCM topic names this device is currently subscribed to via the
-     * Live Updates SDK. Reflects only subscriptions made through [subscribeToTopic]; topics
-     * subscribed via direct [FirebaseMessaging] calls or the IID server-side endpoint will
-     * not appear here.
-     */
-    @JvmStatic
-    fun getSubscribedTopics(context: Context): Set<String> =
-        LiveUpdateTopicStore.getAllTopics(context)
 
     // ---------- internal helpers (visible to LiveUpdateHandlerImpl) ----------
 
