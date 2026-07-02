@@ -26,4 +26,30 @@
     -->
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
 
+    <application>
+
+        <!--
+            Interception activity for Live Update chip taps and action-button clicks.
+            Runs transparently, fires tracking via LiveUpdates.handleNotificationResponse,
+            forwards to the destination URI (or the host app's launcher activity), and
+            finishes. singleInstance keeps it off the app's normal task stack.
+        -->
+        <activity
+            android:name="com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdateTrackerActivity"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay" />
+
+        <!--
+            Delete-intent target for Live Update dismissals. Fires dismiss tracking with
+            customActionId = "Dismiss" via LiveUpdates.handleNotificationResponse.
+        -->
+        <receiver
+            android:name="com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdateInteractionReceiver"
+            android:exported="false" />
+
+    </application>
+
 </manifest>

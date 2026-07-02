@@ -14,7 +14,9 @@ package com.adobe.marketing.mobile.messaging.liveupdate
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -22,6 +24,7 @@ import com.adobe.marketing.mobile.ILiveUpdateHandler
 import com.adobe.marketing.mobile.MobileCore
 import com.adobe.marketing.mobile.services.Log
 import com.google.firebase.messaging.RemoteMessage
+import org.json.JSONObject
 
 /**
  * Canonical [ILiveUpdateHandler] implementation. Parses the [RemoteMessage] into a
@@ -83,6 +86,8 @@ class LiveUpdateHandlerImpl(
             .setOngoing(true)
             .setRequestPromotedOngoing(true)
             .setPriority(mapPriority(payload.priority))
+            .setContentIntent(buildTapPendingIntent(context, payload))
+            .setDeleteIntent(buildDismissPendingIntent(context, payload))
         payload.criticalText?.let { builder.setShortCriticalText(it) }
         payload.whenMillis?.let { builder.setWhen(it).setShowWhen(true) }
 
@@ -92,6 +97,8 @@ class LiveUpdateHandlerImpl(
         payload.dismissAfterSeconds?.takeIf { it > 0L }?.let {
             builder.setTimeoutAfter(it * 1000L)
         }
+
+        addActionButtons(context, builder, payload)
 
         val notification = builder.build()
 
@@ -110,6 +117,97 @@ class LiveUpdateHandlerImpl(
         // if event_type is non-canonical (logged inside the helpers); listener can be null.
         LiveUpdates.dispatchLiveUpdateEventTracking(context, payload)
         LiveUpdates.invokeListener(payload)
+    }
+
+    /**
+     * Builds the content-intent PendingIntent for the chip body tap. Routes through the
+     * SDK's [LiveUpdateTrackerActivity] so tracking fires before the destination launches.
+     */
+    private fun buildTapPendingIntent(
+        context: Context,
+        payload: LiveUpdatePayload
+    ): PendingIntent {
+        val tapIntent = Intent(context, LiveUpdateTrackerActivity::class.java).apply {
+            addTrackingExtras(payload)
+            payload.actionUri?.let { putExtra(LiveUpdates.EXTRA_ACTION_URI, it) }
+        }
+        return PendingIntent.getActivity(
+            context,
+            payload.notificationId.hashCode(),
+            tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    /**
+     * Builds the delete-intent PendingIntent for chip dismissal. Broadcasts to
+     * [LiveUpdateInteractionReceiver] which fires `customActionId="Dismiss"` tracking.
+     */
+    private fun buildDismissPendingIntent(
+        context: Context,
+        payload: LiveUpdatePayload
+    ): PendingIntent {
+        val dismissIntent = Intent(context, LiveUpdateInteractionReceiver::class.java).apply {
+            action = LiveUpdateInteractionReceiver.ACTION_DISMISS
+            addTrackingExtras(payload)
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            payload.notificationId.hashCode() + DISMISS_REQUEST_CODE_OFFSET,
+            dismissIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    /**
+     * Adds one [NotificationCompat.Action] per entry in `payload.actionButtons`. Each entry
+     * must be a JSON object with `label` (required) and optional `uri`. All action buttons
+     * route through [LiveUpdateTrackerActivity]; the button's `label` rides as the
+     * `customActionId` (Messaging's convention) so tracking can distinguish which button
+     * fired the interaction.
+     */
+    private fun addActionButtons(
+        context: Context,
+        builder: NotificationCompat.Builder,
+        payload: LiveUpdatePayload
+    ) {
+        val buttons = payload.actionButtons ?: return
+        for (i in 0 until buttons.length()) {
+            val button = buttons.optJSONObject(i) ?: continue
+            val label = button.optString(KEY_ACTION_BUTTON_LABEL).takeIf { it.isNotEmpty() }
+            if (label == null) {
+                Log.debug(
+                    LOG_TAG, TAG,
+                    "Skipping action button at index $i: missing 'label' field."
+                )
+                continue
+            }
+            val uri = button.optString(KEY_ACTION_BUTTON_URI).takeIf { it.isNotEmpty() }
+            val actionIntent = Intent(context, LiveUpdateTrackerActivity::class.java).apply {
+                addTrackingExtras(payload)
+                putExtra(LiveUpdates.EXTRA_ACTION_ID, label)
+                uri?.let { putExtra(LiveUpdates.EXTRA_ACTION_URI, it) }
+            }
+            val actionPi = PendingIntent.getActivity(
+                context,
+                (payload.notificationId + label).hashCode(),
+                actionIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            builder.addAction(NotificationCompat.Action(0, label, actionPi))
+        }
+    }
+
+    /**
+     * Adds Live Update tracking extras to [this] intent so the tracker Activity or dismiss
+     * receiver can reconstruct enough context for the outbound XDM without a second parse
+     * of the FCM message.
+     */
+    private fun Intent.addTrackingExtras(payload: LiveUpdatePayload) {
+        putExtra(LiveUpdates.EXTRA_NOTIFICATION_ID, payload.notificationId)
+        putExtra(LiveUpdates.EXTRA_EVENT_TYPE, payload.eventType)
+        payload.topicName?.let { putExtra(LiveUpdates.EXTRA_CHANNEL_ID, it) }
+        payload.xdm?.let { putExtra(LiveUpdates.EXTRA_XDM, it.toString()) }
     }
 
     /**
@@ -206,6 +304,14 @@ class LiveUpdateHandlerImpl(
         const val LOG_TAG = "LiveUpdateHandlerImpl"
         const val DEFAULT_CHANNEL_NAME = "Live Updates"
         const val DEFAULT_CHANNEL_DESCRIPTION = "Status-bar chips for AJO Live Updates"
+
+        // action_buttons entry field names.
+        const val KEY_ACTION_BUTTON_LABEL = "label"
+        const val KEY_ACTION_BUTTON_URI = "uri"
+
+        // Keeps dismiss PendingIntent's request code distinct from tap's so
+        // PendingIntent.FLAG_UPDATE_CURRENT does not collapse them.
+        const val DISMISS_REQUEST_CODE_OFFSET = 1
     }
 }
 
