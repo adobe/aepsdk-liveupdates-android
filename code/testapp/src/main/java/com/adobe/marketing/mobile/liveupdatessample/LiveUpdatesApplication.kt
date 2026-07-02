@@ -67,7 +67,7 @@ class LiveUpdatesApplication : Application() {
         // Auto-mode integration: register a LiveUpdateHandlerImpl with the app's
         // ILiveUpdateStyleProvider. The SDK takes over rendering on every incoming push
         // whose data map carries `adb_liveupdate_data`.
-        Messaging.setLiveUpdateHandler(LiveUpdateHandlerImpl(SampleLiveUpdateStyleProvider()))
+        Messaging.setLiveUpdateHandler(LiveUpdateHandlerImpl(SampleLiveUpdateStyleProvider(applicationContext)))
 
         // Optional: react to Live Update lifecycle events from the app side. The generic
         // onLiveUpdateReceived fires for every push; onStart / onUpdate / onEnd fire next
