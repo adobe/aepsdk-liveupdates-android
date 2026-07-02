@@ -56,6 +56,7 @@ object LiveUpdates {
     // XDM schema field names - match the canonical AJO Push Tracking Experience Event Schema,
     // which is the same schema the iOS Live Activities tracking flow populates in production.
     private const val XDM_KEY_EVENT_TYPE = "eventType"
+    private const val XDM_VALUE_LIVE_UPDATE_TRACKING_RECEIVED = "liveUpdateTracking.received"
     private const val XDM_VALUE_LIVE_UPDATE_TRACKING_APPLICATION_OPENED = "liveUpdateTracking.applicationOpened"
     private const val XDM_VALUE_LIVE_UPDATE_TRACKING_CUSTOM_ACTION = "liveUpdateTracking.customAction"
     private const val XDM_KEY_PUSH_NOTIFICATION_TRACKING = "pushNotificationTracking"
@@ -228,8 +229,6 @@ object LiveUpdates {
             // Not one of ours; leaves standard-push tracking to Messaging.handleNotificationResponse.
             return false
         }
-        val liveActivityEvent =
-            intent.getStringExtra(EXTRA_EVENT_TYPE) ?: LiveUpdatePayload.EVENT_TYPE_UPDATE
         val channelId = intent.getStringExtra(EXTRA_CHANNEL_ID)
         val xdmString = intent.getStringExtra(EXTRA_XDM)
         val xdm = xdmString?.takeIf { it.isNotEmpty() }?.let { raw ->
@@ -246,7 +245,6 @@ object LiveUpdates {
         dispatchInteractionTracking(
             notificationId = notificationId,
             topicName = channelId,
-            liveActivityEvent = liveActivityEvent,
             incomingXdm = xdm,
             applicationOpened = applicationOpened,
             customActionId = customActionId
@@ -349,7 +347,7 @@ object LiveUpdates {
             return
         }
         dispatchTrackingEvent(
-            xdmEventType = XDM_VALUE_LIVE_UPDATE_TRACKING_APPLICATION_OPENED,
+            xdmEventType = XDM_VALUE_LIVE_UPDATE_TRACKING_RECEIVED,
             notificationId = payload.notificationId,
             topicName = payload.topicName,
             liveActivityEvent = payload.eventType,
@@ -367,11 +365,14 @@ object LiveUpdates {
      *  - `customActionId` non-null (action button click or dismiss) - "liveUpdateTracking.customAction"
      *  - `applicationOpened` true (notification tap) - "liveUpdateTracking.applicationOpened"
      *  - otherwise - no dispatch (nothing to track)
+     *
+     * Interaction events omit `pushChannelContext.liveActivity.event`; only the lifecycle
+     * receive dispatch fills that field. Otherwise a tap or dismiss occurring during the
+     * `start` push would be double-counted against the "start" phase in AJO reporting.
      */
     internal fun dispatchInteractionTracking(
         notificationId: String,
         topicName: String?,
-        liveActivityEvent: String,
         incomingXdm: JSONObject?,
         applicationOpened: Boolean,
         customActionId: String?
@@ -391,7 +392,7 @@ object LiveUpdates {
             xdmEventType = xdmEventType,
             notificationId = notificationId,
             topicName = topicName,
-            liveActivityEvent = liveActivityEvent,
+            liveActivityEvent = null,
             incomingXdm = incomingXdm,
             customActionId = customActionId
         )
@@ -406,7 +407,7 @@ object LiveUpdates {
         xdmEventType: String,
         notificationId: String,
         topicName: String?,
-        liveActivityEvent: String,
+        liveActivityEvent: String?,
         incomingXdm: JSONObject?,
         customActionId: String?
     ) {
@@ -438,17 +439,17 @@ object LiveUpdates {
      * events (`liveUpdateTracking.applicationOpened` for tap,
      * `liveUpdateTracking.customAction` for action-button clicks and dismiss).
      *
-     * The receive lifecycle phase (`start` / `update` / `end`) always rides through
-     * `pushChannelContext.liveActivity.event` regardless of the top-level `eventType`;
-     * server-side AJO reporting uses that field to reconstruct the Live Update timeline.
-     * When [customActionId] is non-null, it is added under
-     * `pushNotificationTracking.customAction.actionID`.
+     * The receive lifecycle phase (`start` / `update` / `end`) rides through
+     * `pushChannelContext.liveActivity.event` only for the receive dispatch; interaction
+     * events (tap / action click / dismiss) omit the field so AJO reporting does not
+     * double-count them against the concurrent lifecycle phase. When [customActionId]
+     * is non-null, it is added under `pushNotificationTracking.customAction.actionID`.
      */
     private fun buildLiveActivityTrackingXdm(
         xdmEventType: String,
         notificationId: String,
         topicName: String?,
-        liveActivityEvent: String,
+        liveActivityEvent: String?,
         incomingXdm: JSONObject?,
         customActionId: String?
     ): Map<String, Any?> {
@@ -504,13 +505,19 @@ object LiveUpdates {
         }
         cjm[XDM_KEY_MESSAGE_PROFILE] = messageProfile
 
+        val liveActivity = mutableMapOf<String, Any?>(
+            XDM_KEY_LIVE_ACTIVITY_ID to notificationId,
+            XDM_KEY_LIVE_ACTIVITY_CHANNEL_ID to (topicName ?: "")
+        )
+        // liveActivity.event is populated only for receive lifecycle events (start/update/end),
+        // never for interaction events. Otherwise AJO reporting would double-count a tap or
+        // dismiss during the "start" push toward the "start" phase.
+        if (!liveActivityEvent.isNullOrEmpty()) {
+            liveActivity[XDM_KEY_LIVE_ACTIVITY_EVENT] = liveActivityEvent
+        }
         cjm[XDM_KEY_PUSH_CHANNEL_CONTEXT] = mapOf<String, Any?>(
             XDM_KEY_PLATFORM to XDM_VALUE_PLATFORM_FCM,
-            XDM_KEY_LIVE_ACTIVITY to mapOf<String, Any?>(
-                XDM_KEY_LIVE_ACTIVITY_ID to notificationId,
-                XDM_KEY_LIVE_ACTIVITY_CHANNEL_ID to (topicName ?: ""),
-                XDM_KEY_LIVE_ACTIVITY_EVENT to liveActivityEvent
-            )
+            XDM_KEY_LIVE_ACTIVITY to liveActivity
         )
 
         experience[XDM_KEY_CUSTOMER_JOURNEY_MANAGEMENT] = cjm

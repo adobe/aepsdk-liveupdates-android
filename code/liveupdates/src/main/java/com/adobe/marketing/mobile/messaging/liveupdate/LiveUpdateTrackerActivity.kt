@@ -17,6 +17,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import com.adobe.marketing.mobile.services.Log
+import com.adobe.marketing.mobile.services.ServiceProvider
 
 /**
  * Transparent, single-instance activity that intercepts Live Update chip taps and
@@ -66,31 +67,51 @@ class LiveUpdateTrackerActivity : Activity() {
 
     private fun launchDestination(incoming: Intent) {
         val destinationUri = incoming.getStringExtra(LiveUpdates.EXTRA_ACTION_URI)
-        val launchIntent: Intent? = if (!destinationUri.isNullOrEmpty()) {
-            Intent(Intent.ACTION_VIEW, Uri.parse(destinationUri)).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            }
+        if (destinationUri.isNullOrEmpty()) {
+            openApplication()
         } else {
-            packageManager.getLaunchIntentForPackage(packageName)?.apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP
-            }
+            openUri(destinationUri)
         }
+    }
 
+    /**
+     * Opens the host application. If an activity is currently in the foreground, resumes
+     * it via a same-component intent so the user lands back where they were; otherwise
+     * launches the default launcher activity. Mirrors Messaging's
+     * `MessagingPushTrackerActivity.openApplication`.
+     */
+    private fun openApplication() {
+        val currentActivity = ServiceProvider.getInstance().appContextService.currentActivity
+        val launchIntent: Intent? = if (currentActivity != null) {
+            Intent(currentActivity, currentActivity.javaClass)
+        } else {
+            Log.debug(TAG, TAG, "No active activity; opening launcher activity.")
+            packageManager.getLaunchIntentForPackage(packageName)
+        }
         if (launchIntent == null) {
-            Log.debug(
+            Log.warning(
                 TAG, TAG,
-                "No destination to launch for Live Update interaction (no action_uri and no launcher activity)."
+                "Unable to create an intent to open the application from the Live Update interaction."
             )
             return
         }
+        launchIntent.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        startActivity(launchIntent)
+    }
+
+    /**
+     * Opens the provided URI via [Intent.ACTION_VIEW]. Logs a warning and no-ops if no
+     * activity on the device can handle the URI. Matches Messaging's `openUri` behaviour
+     * exactly - no automatic fallback to the launcher activity so a misconfigured deeplink
+     * surfaces clearly in the logs instead of silently coercing to a launcher open.
+     */
+    private fun openUri(uri: String) {
         try {
-            startActivity(launchIntent)
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)))
         } catch (e: ActivityNotFoundException) {
             Log.warning(
                 TAG, TAG,
-                "Unable to launch destination for Live Update interaction: ${e.localizedMessage}"
+                "Unable to open the URI from the Live Update interaction. URI: $uri"
             )
         }
     }
