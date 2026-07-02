@@ -76,7 +76,7 @@ class LiveUpdateHandlerImpl(
         ensureChannelExists(context, payload.channelId)
 
         val builder = NotificationCompat.Builder(context, payload.channelId)
-            .setSmallIcon(resolveSmallIcon(context))
+            .setSmallIcon(resolveSmallIcon(context, payload.smallIcon))
             .setContentTitle(payload.title)
             .setContentText(payload.body)
             .setStyle(style)
@@ -113,10 +113,24 @@ class LiveUpdateHandlerImpl(
     }
 
     /**
-     * Resolves the small icon resource id: prefer the app's `MobileCore`-configured icon,
-     * fall back to the app's launcher icon. A small icon is mandatory or `notify()` throws.
+     * Resolves the small icon resource id using a three-step fallback:
+     *  1. If the envelope carried a `small_icon` name and it resolves to a drawable in the
+     *     host app's resources, use it.
+     *  2. Otherwise, use the icon configured globally via
+     *     [MobileCore.setSmallIconResourceID].
+     *  3. Otherwise, use the app's launcher icon.
+     *
+     * A small icon is mandatory or `notify()` throws.
      */
-    private fun resolveSmallIcon(context: Context): Int {
+    private fun resolveSmallIcon(context: Context, payloadIconName: String?): Int {
+        if (!payloadIconName.isNullOrEmpty()) {
+            val resolved = context.resources.getIdentifier(
+                payloadIconName,
+                "drawable",
+                context.packageName
+            )
+            if (resolved > 0) return resolved
+        }
         val configured = MobileCore.getSmallIconResourceID()
         if (configured > 0) return configured
         return context.applicationInfo.icon

@@ -55,6 +55,11 @@ class LiveUpdatePayload private constructor(
     // pushChannelContext.liveActivity.channelID. The StyleProvider does NOT read it.
     val topicName: String?,
 
+    // Per-push small icon override. Drawable resource name (e.g. "ic_flight_notification").
+    // Resolved by the renderer via Resources.getIdentifier. When null or unresolvable, the
+    // renderer falls back to MobileCore.getSmallIconResourceID(), then to the app icon.
+    val smallIcon: String?,
+
     // Parsed AJO XDM tracking block from data['_xdm']. Opaque to the SDK; passed through
     // to Edge as-is in the Live Update event tracking dispatch so AJO server-side reporting
     // can correlate via messageExecutionID / campaignID / etc. Null when '_xdm' is absent
@@ -79,6 +84,7 @@ class LiveUpdatePayload private constructor(
         private const val KEY_ACTION_URI = "action_uri"
         private const val KEY_ACTION_BUTTONS = "action_buttons"
         private const val KEY_TOPIC_NAME = "topic_name"
+        private const val KEY_SMALL_ICON = "small_icon"
 
         // FCM data map key for the XDM passthrough block.
         private const val DATA_KEY_XDM = "_xdm"
@@ -152,6 +158,7 @@ class LiveUpdatePayload private constructor(
                 actionUri = obj.optString(KEY_ACTION_URI).takeIf { it.isNotEmpty() },
                 actionButtons = obj.optJSONArray(KEY_ACTION_BUTTONS),
                 topicName = obj.optString(KEY_TOPIC_NAME).takeIf { it.isNotEmpty() },
+                smallIcon = obj.optString(KEY_SMALL_ICON).takeIf { it.isNotEmpty() },
                 xdm = xdm
             )
         }
