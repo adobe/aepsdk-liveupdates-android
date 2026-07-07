@@ -38,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,9 +69,19 @@ class MainActivity : ComponentActivity() {
         startAssuranceSessionIfAny(intent)
 
         setContent {
+            var showTopics by remember { mutableStateOf(false) }
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    LiveUpdateInfoScreen(fcmToken = fcmToken)
+                    if (showTopics) {
+                        TopicsScreen()
+                        // Back navigation is handled by the system back gesture returning to
+                        // the home screen; the button below the FCM token flips the flag.
+                    } else {
+                        LiveUpdateInfoScreen(
+                            fcmToken = fcmToken,
+                            onOpenTopics = { showTopics = true }
+                        )
+                    }
                 }
             }
         }
@@ -137,7 +148,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun LiveUpdateInfoScreen(fcmToken: String?) {
+private fun LiveUpdateInfoScreen(fcmToken: String?, onOpenTopics: () -> Unit) {
     val context = LocalContext.current
 
     Column(
@@ -180,6 +191,10 @@ private fun LiveUpdateInfoScreen(fcmToken: String?) {
             text = "Run the copied command from the repo root to send a Live Update push.",
             style = MaterialTheme.typography.bodySmall
         )
+        Spacer(modifier = Modifier.height(24.dp))
+        Button(onClick = onOpenTopics) {
+            Text("Manage FCM topics")
+        }
     }
 }
 
