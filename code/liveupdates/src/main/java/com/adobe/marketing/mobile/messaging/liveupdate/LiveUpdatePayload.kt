@@ -94,6 +94,64 @@ class LiveUpdatePayload private constructor(
         const val EVENT_TYPE_UPDATE = "update"
         const val EVENT_TYPE_END = "end"
 
+        /**
+         * event_type value used when the host application triggers a Live Update locally
+         * via [LiveUpdates.triggerLocalLiveUpdate], as opposed to receiving it as an FCM
+         * push. Matches the iOS Live Activities `localStart` convention.
+         */
+        const val EVENT_TYPE_LOCAL_START = "localstart"
+
+        /**
+         * TODO(ergonomics): [create] takes 16 arguments to expose every envelope field.
+         * Consider a builder / DSL / partial-payload variant if callers commonly set only
+         * the required subset. For now the ceremony is intentional so new envelope fields
+         * force call-site updates.
+         *
+         * Constructs a [LiveUpdatePayload] directly from typed inputs, without an
+         * intermediate `RemoteMessage`. Primary use case is
+         * [LiveUpdates.triggerLocalLiveUpdate], where the host app raises a Live Update
+         * chip programmatically. Required inputs match the envelope's required fields
+         * (`notification_id`, `channel_id`, `event_type`, `title`); everything else is
+         * optional and defaults to `null` / absent.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun create(
+            notificationId: String,
+            channelId: String,
+            eventType: String,
+            title: String,
+            priority: String? = null,
+            body: String? = null,
+            criticalText: String? = null,
+            whenMillis: Long? = null,
+            dismissAfterSeconds: Long? = null,
+            contentState: JSONObject? = null,
+            actionType: String? = null,
+            actionUri: String? = null,
+            actionButtons: JSONArray? = null,
+            topicName: String? = null,
+            smallIcon: String? = null,
+            xdm: JSONObject? = null
+        ): LiveUpdatePayload = LiveUpdatePayload(
+            notificationId = notificationId,
+            channelId = channelId,
+            eventType = eventType,
+            title = title,
+            priority = priority,
+            body = body,
+            criticalText = criticalText,
+            whenMillis = whenMillis,
+            dismissAfterSeconds = dismissAfterSeconds,
+            contentState = contentState,
+            actionType = actionType,
+            actionUri = actionUri,
+            actionButtons = actionButtons,
+            topicName = topicName,
+            smallIcon = smallIcon,
+            xdm = xdm
+        )
+
         /** Fast detection - does this [message] carry the Live Update envelope key? */
         @JvmStatic
         fun isLiveUpdate(message: RemoteMessage): Boolean =

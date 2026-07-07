@@ -17,6 +17,7 @@ import com.adobe.marketing.mobile.AdobeCallback
 import com.adobe.marketing.mobile.Event
 import com.adobe.marketing.mobile.EventSource
 import com.adobe.marketing.mobile.EventType
+import com.adobe.marketing.mobile.Messaging
 import com.adobe.marketing.mobile.MobileCore
 import com.adobe.marketing.mobile.services.Log
 import com.google.firebase.messaging.FirebaseMessaging
@@ -172,6 +173,42 @@ object LiveUpdates {
         }
         dispatchLiveUpdateEventTracking(context, payload)
         invokeListener(payload)
+    }
+
+    /**
+     * TODO(ergonomics): callers must build a full [LiveUpdatePayload] up front (16 fields
+     * on the factory). If real-world usage settles into "everyone sets only 4-5 of them",
+     * layer a lighter overload on top (envelope-JSON string, builder, or partial-payload
+     * DSL). Deferred until we see how apps actually adopt the API.
+     *
+     * Renders a Live Update chip locally (no FCM push required) using the passed [payload],
+     * dispatches the receive lifecycle tracking event, and invokes any registered
+     * [ILiveUpdateListener]. Intended for cases where the host application starts a Live
+     * Update from local state - a workout timer, a step-by-step onboarding, a self-initiated
+     * download - and wants the chip + tracking without a round trip through the server.
+     *
+     * The passed payload's `event_type` drives the outbound tracking value. Use
+     * [LiveUpdatePayload.EVENT_TYPE_LOCAL_START] to mark the initial locally-raised chip so
+     * server-side reporting can distinguish it from an FCM `start`.
+     *
+     * @return `true` if the SDK's canonical [LiveUpdateHandlerImpl] was registered via
+     *   [Messaging.setLiveUpdateHandler] and rendering ran; `false` if the registered
+     *   handler is a custom implementation the SDK cannot invoke directly (in that case
+     *   the host app should render the notification itself and call [trackLiveUpdateEvent]).
+     */
+    @JvmStatic
+    fun triggerLocalLiveUpdate(context: Context, payload: LiveUpdatePayload): Boolean {
+        val handler = Messaging.getLiveUpdateHandler()
+        if (handler !is LiveUpdateHandlerImpl) {
+            Log.warning(
+                SELF_TAG, SELF_TAG,
+                "triggerLocalLiveUpdate requires the canonical LiveUpdateHandlerImpl to be " +
+                    "registered via Messaging.setLiveUpdateHandler(...). Skipping."
+            )
+            return false
+        }
+        handler.postLiveUpdate(context, payload)
+        return true
     }
 
     // ---------- Interaction tracking (tap / action / dismiss) ----------
@@ -338,7 +375,8 @@ object LiveUpdates {
         val eventType = payload.eventType
         val isCanonical = eventType == LiveUpdatePayload.EVENT_TYPE_START ||
             eventType == LiveUpdatePayload.EVENT_TYPE_UPDATE ||
-            eventType == LiveUpdatePayload.EVENT_TYPE_END
+            eventType == LiveUpdatePayload.EVENT_TYPE_END ||
+            eventType == LiveUpdatePayload.EVENT_TYPE_LOCAL_START
         if (!isCanonical) {
             Log.debug(
                 SELF_TAG, SELF_TAG,

@@ -22,6 +22,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.adobe.marketing.mobile.ILiveUpdateHandler
 import com.adobe.marketing.mobile.MobileCore
+import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload.Companion.EVENT_TYPE_END
 import com.adobe.marketing.mobile.services.Log
 import com.google.firebase.messaging.RemoteMessage
 import org.json.JSONObject
@@ -60,7 +61,16 @@ class LiveUpdateHandlerImpl(
             Log.warning(LOG_TAG, TAG, "Dropping Live Update: failed to parse payload.")
             return
         }
+        postLiveUpdate(context, payload)
+    }
 
+    /**
+     * Renders and posts the chip for [payload], then dispatches the receive lifecycle
+     * tracking event and invokes any registered [ILiveUpdateListener]. Shared between the
+     * FCM-received flow ([handleLiveUpdatePush]) and the app-triggered local flow
+     * ([LiveUpdates.triggerLocalLiveUpdate]).
+     */
+    internal fun postLiveUpdate(context: Context, payload: LiveUpdatePayload) {
         val style = styleProvider.provideStyle(payload)
         if (style == null) {
             Log.warning(
@@ -94,8 +104,10 @@ class LiveUpdateHandlerImpl(
         // Apply auto-dismiss whenever dismiss_after is present and positive. Not gated on
         // any event_type marker — the server decides "is this the last push?" by including
         // or omitting dismiss_after, not by sending a magic event string.
-        payload.dismissAfterSeconds?.takeIf { it > 0L }?.let {
-            builder.setTimeoutAfter(it * 1000L)
+        if (payload.eventType == EVENT_TYPE_END) {
+            payload.dismissAfterSeconds?.takeIf { it > 0L }?.let {
+                builder.setTimeoutAfter(it * 1000L)
+            }
         }
 
         addActionButtons(context, builder, payload)
