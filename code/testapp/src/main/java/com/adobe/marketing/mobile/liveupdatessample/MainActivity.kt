@@ -73,7 +73,7 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     if (showTopics) {
-                        TopicsScreen()
+                        TopicsScreen(fcmToken = fcmToken)
                         // Back navigation is handled by the system back gesture returning to
                         // the home screen; the button below the FCM token flips the flag.
                     } else {
@@ -177,18 +177,10 @@ private fun LiveUpdateInfoScreen(fcmToken: String?, onOpenTopics: () -> Unit) {
             Button(onClick = { copyToClipboard(context, fcmToken, "FCM token") }) {
                 Text("Copy FCM token")
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            Button(
-                onClick = {
-                    copyToClipboard(context, "./fcm.sh $fcmToken", "fcm.sh command")
-                }
-            ) {
-                Text("Copy ./fcm.sh <token> command")
-            }
         }
         Spacer(modifier = Modifier.height(24.dp))
         Text(
-            text = "Run the copied command from the repo root to send a Live Update push.",
+            text = "Use this token as the target when sending FCM Live Update pushes to the device.",
             style = MaterialTheme.typography.bodySmall
         )
         Spacer(modifier = Modifier.height(24.dp))
