@@ -15,6 +15,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdates
 import com.adobe.marketing.mobile.services.HttpMethod
 import com.adobe.marketing.mobile.services.NetworkRequest
 import com.adobe.marketing.mobile.services.ServiceProvider
@@ -72,7 +74,7 @@ import kotlin.coroutines.resume
  * across dialog dismissals - the user must paste it again on every refresh.
  */
 @Composable
-fun TopicsScreen(fcmToken: String?) {
+fun TopicsScreen(fcmToken: String?, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var topicInput by remember { mutableStateOf("") }
@@ -80,6 +82,10 @@ fun TopicsScreen(fcmToken: String?) {
     var showTokenDialog by remember { mutableStateOf(false) }
     var isFetching by remember { mutableStateOf(false) }
     var topics by remember { mutableStateOf<List<String>?>(null) }
+    var lastOauthToken by remember { mutableStateOf("") }
+
+    // System back gesture/button returns to the home screen instead of exiting the app.
+    BackHandler(onBack = onBack)
 
     // Auto-dismiss the result snackbar after a short delay. Loading state stays until the
     // FirebaseMessaging task completes and replaces it.
@@ -99,6 +105,15 @@ fun TopicsScreen(fcmToken: String?) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Top
         ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Start
+            ) {
+                TextButton(onClick = onBack) {
+                    Text("← Back")
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = "FCM Topic Subscriptions",
                 style = MaterialTheme.typography.headlineSmall
@@ -141,6 +156,11 @@ fun TopicsScreen(fcmToken: String?) {
                                     failPrefix = "Failed to subscribe to \"$topic\""
                                 )
                                 Log.d(TAG, "subscribeToTopic($topic) -> ${task.isSuccessful}", task.exception)
+                                if (task.isSuccessful) {
+                                    // Manual subscribe from the topics screen - no live update
+                                    // context, so notificationId is null.
+                                    LiveUpdates.trackTopicSubscribed(topic)
+                                }
                             }
                     },
                     modifier = Modifier.fillMaxWidth().weight(1f)
@@ -164,6 +184,9 @@ fun TopicsScreen(fcmToken: String?) {
                                     failPrefix = "Failed to unsubscribe from \"$topic\""
                                 )
                                 Log.d(TAG, "unsubscribeFromTopic($topic) -> ${task.isSuccessful}", task.exception)
+                                if (task.isSuccessful) {
+                                    LiveUpdates.trackTopicUnsubscribed(topic)
+                                }
                             }
                     },
                     modifier = Modifier.fillMaxWidth().weight(1f)
@@ -250,8 +273,10 @@ fun TopicsScreen(fcmToken: String?) {
 
     if (showTokenDialog) {
         AccessTokenDialog(
+            initialToken = lastOauthToken,
             onDismiss = { showTokenDialog = false },
             onFetch = { accessToken ->
+                lastOauthToken = accessToken
                 showTokenDialog = false
                 val safeFcmToken = fcmToken ?: return@AccessTokenDialog
                 scope.launch {
@@ -277,17 +302,18 @@ fun TopicsScreen(fcmToken: String?) {
 
 @Composable
 private fun AccessTokenDialog(
+    initialToken: String = "",
     onDismiss: () -> Unit,
     onFetch: (String) -> Unit
 ) {
-    var tokenInput by remember { mutableStateOf("") }
+    var tokenInput by remember { mutableStateOf(initialToken) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("OAuth2 access token") },
         text = {
             Column {
                 Text(
-                    text = "Paste an OAuth2 access token authorized to call the Firebase Cloud Messaging Instance ID API. The token is not stored - you'll need to paste it again on every refresh.",
+                    text = "Paste an OAuth2 access token authorized to call the Firebase Cloud Messaging Instance ID API. Pre-filled with the last-used token - replace it if it has expired.",
                     style = MaterialTheme.typography.bodySmall
                 )
                 Spacer(modifier = Modifier.height(12.dp))

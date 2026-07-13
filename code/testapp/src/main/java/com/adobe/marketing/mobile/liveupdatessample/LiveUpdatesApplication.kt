@@ -27,6 +27,7 @@ import com.adobe.marketing.mobile.messaging.liveupdate.ILiveUpdateListener
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdateHandlerImpl
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdates
+import com.google.firebase.messaging.FirebaseMessaging
 
 class LiveUpdatesApplication : Application() {
 
@@ -49,7 +50,6 @@ class LiveUpdatesApplication : Application() {
         MobileCore.registerExtensions(extensions) {
             // TODO: replace with the environment file id from your Adobe Data Collection
             // (Launch) property before running the sample app against real infrastructure.
-            MobileCore.configureWithAppID("YOUR_ENVIRONMENT_FILE_ID")
             MobileCore.lifecycleStart(null)
 
             // Primary identity demonstration. AJO uses this to correlate server-side
@@ -82,6 +82,22 @@ class LiveUpdatesApplication : Application() {
 
             override fun onStart(payload: LiveUpdatePayload) {
                 Log.d(TAG, "Live Update START: id=${payload.notificationId} title='${payload.title}'")
+                // On start, subscribe this device to the Live Update's topic so future
+                // broadcast pushes for the same activity reach us. Topic subscribe /
+                // unsubscribe is an application-side responsibility; the SDK exposes
+                // tracking dispatch (trackTopicSubscribed) so the subscribe event lands in
+                // AJO reporting alongside the lifecycle events. Fired only on Firebase
+                // success so reporting counts reflect real server-side subscription state.
+                val topic = payload.topicName ?: return
+                FirebaseMessaging.getInstance().subscribeToTopic(topic)
+                    .addOnCompleteListener { task ->
+                        if (task.isSuccessful) {
+                            LiveUpdates.trackTopicSubscribed(topic, payload.notificationId)
+                            Log.d(TAG, "Subscribed to topic '$topic' (triggered by Live Update start).")
+                        } else {
+                            Log.w(TAG, "subscribeToTopic($topic) failed: ${task.exception?.localizedMessage}")
+                        }
+                    }
             }
 
             override fun onUpdate(payload: LiveUpdatePayload) {
@@ -90,6 +106,18 @@ class LiveUpdatesApplication : Application() {
 
             override fun onEnd(payload: LiveUpdatePayload) {
                 Log.d(TAG, "Live Update END: id=${payload.notificationId} (chip will dismiss soon)")
+                // Mirror of onStart: unsubscribe from the topic when the Live Update ends
+                // and dispatch the corresponding tracking event on success.
+                val topic = payload.topicName ?: return
+                FirebaseMessaging.getInstance().unsubscribeFromTopic(topic)
+                    .addOnCompleteListener { task ->
+                        if (task.isSuccessful) {
+                            LiveUpdates.trackTopicUnsubscribed(topic, payload.notificationId)
+                            Log.d(TAG, "Unsubscribed from topic '$topic' (triggered by Live Update end).")
+                        } else {
+                            Log.w(TAG, "unsubscribeFromTopic($topic) failed: ${task.exception?.localizedMessage}")
+                        }
+                    }
             }
         })
     }

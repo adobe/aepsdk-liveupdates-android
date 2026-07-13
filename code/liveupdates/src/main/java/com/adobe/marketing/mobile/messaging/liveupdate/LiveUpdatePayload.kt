@@ -201,7 +201,7 @@ class LiveUpdatePayload private constructor(
                 }
             }
 
-            return LiveUpdatePayload(
+            val payload = LiveUpdatePayload(
                 notificationId = notificationId,
                 channelId = channelId,
                 eventType = eventType,
@@ -219,6 +219,8 @@ class LiveUpdatePayload private constructor(
                 smallIcon = obj.optString(KEY_SMALL_ICON).takeIf { it.isNotEmpty() },
                 xdm = xdm
             )
+            Log.debug(MessagingConstants.LOG_TAG, SELF_TAG, "Parsed Live Update payload: $payload")
+            return payload
         }
 
         /** Reads a non-empty string field, logging a debug message and returning null if missing. */

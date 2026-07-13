@@ -9,19 +9,8 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-apply(plugin = "aep-license")
 
-buildscript {
-    repositories {
-        gradlePluginPortal()
-        google()
-        mavenCentral()
-        maven { url = uri("https://jitpack.io") }
-        mavenLocal()
-    }
-    dependencies {
-        classpath("com.github.adobe.aepsdk-commons:aepsdk-gradle-plugin:4.0.0")
-        // Reads testapp/google-services.json and configures Firebase at build time.
-        classpath("com.google.gms:google-services:4.4.1")
-    }
-}
+// Root project. Intentionally minimal:
+//  - Plugin versions live in settings.gradle.kts pluginManagement.
+//  - The aepsdk-commons Gradle plugin is loaded only by the :liveupdates module, from
+//    its own buildscript {} block. The testapp is not aware of commons at all.

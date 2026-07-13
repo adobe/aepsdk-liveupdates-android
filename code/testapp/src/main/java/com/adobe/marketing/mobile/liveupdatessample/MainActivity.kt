@@ -73,9 +73,10 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     if (showTopics) {
-                        TopicsScreen(fcmToken = fcmToken)
-                        // Back navigation is handled by the system back gesture returning to
-                        // the home screen; the button below the FCM token flips the flag.
+                        TopicsScreen(
+                            fcmToken = fcmToken,
+                            onBack = { showTopics = false }
+                        )
                     } else {
                         LiveUpdateInfoScreen(
                             fcmToken = fcmToken,
