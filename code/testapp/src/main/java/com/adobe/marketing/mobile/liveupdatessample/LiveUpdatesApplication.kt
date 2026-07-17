@@ -69,6 +69,14 @@ class LiveUpdatesApplication : Application() {
         // whose data map carries `adb_liveupdate_data`.
         Messaging.setLiveUpdateHandler(LiveUpdateHandlerImpl(SampleLiveUpdateStyleProvider(applicationContext)))
 
+        // Interceptor demo: suppress Live Updates the user already dismissed. The store records
+        // dismissed ids (see onDismissed below); the interceptor vetoes any incoming Live Update
+        // whose id is in that set. Gated by SampleLiveUpdateInterceptor.DISCARD_DISMISSED_UPDATES.
+        val dismissedStore = DismissedLiveUpdateStore(applicationContext)
+        LiveUpdates.setLiveUpdateInterceptor(
+            SampleLiveUpdateInterceptor(applicationContext, dismissedStore)
+        )
+
         // Optional: react to Live Update lifecycle events from the app side. The generic
         // onLiveUpdateReceived fires for every push; onStart / onUpdate / onEnd fire next
         // based on the envelope's event_type.
@@ -119,6 +127,11 @@ class LiveUpdatesApplication : Application() {
                     "Live Update DISMISSED: id=${payload.notificationId} title='${payload.title}' " +
                         "event=${payload.eventType}"
                 )
+                // Remember the dismissal so the interceptor keeps this activity's future pushes
+                // off-screen. Gated by the same feature flag as the interceptor.
+                if (SampleLiveUpdateInterceptor.DISCARD_DISMISSED_UPDATES) {
+                    dismissedStore.markDismissed(payload.notificationId)
+                }
                 unSubscribeFromTopic(payload)
             }
         })
