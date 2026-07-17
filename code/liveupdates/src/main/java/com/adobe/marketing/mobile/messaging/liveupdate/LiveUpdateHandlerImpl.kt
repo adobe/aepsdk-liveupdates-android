@@ -61,6 +61,15 @@ class LiveUpdateHandlerImpl(
             Log.warning(LiveUpdatesConstants.LOG_TAG, TAG, "Dropping Live Update: failed to parse payload.")
             return
         }
+        // Consult the app-registered interceptor before any rendering / tracking / listener
+        // dispatch. A `false` verdict drops the Live Update entirely.
+        if (!LiveUpdates.shouldDisplay(payload)) {
+            Log.debug(
+                LiveUpdatesConstants.LOG_TAG, TAG,
+                "Live Update id=${payload.notificationId} vetoed by ILiveUpdateInterceptor; dropping."
+            )
+            return
+        }
         postLiveUpdate(context, payload)
     }
 

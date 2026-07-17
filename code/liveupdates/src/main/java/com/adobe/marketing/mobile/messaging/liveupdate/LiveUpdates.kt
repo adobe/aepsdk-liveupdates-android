@@ -126,6 +126,11 @@ object LiveUpdates {
     @Volatile
     private var cachedEventDatasetId: String? = null
 
+    // App-registered gate consulted before rendering/tracking an incoming Live Update. Held
+    // directly on the facade (no separate store) since only this class reads and writes it.
+    @Volatile
+    private var liveUpdateInterceptor: ILiveUpdateInterceptor? = null
+
     init {
         // Listen for Configuration response events so we can cache messaging.eventDataset and
         // inject it on every outbound tracking dispatch. The Configuration extension fires
@@ -166,6 +171,42 @@ object LiveUpdates {
     /** Returns the currently-registered [ILiveUpdateListener], or `null` if none. */
     @JvmStatic
     fun getLiveUpdateListener(): ILiveUpdateListener? = LiveUpdateListenerStore.getListener()
+
+    // ---------- Interceptor registration ----------
+
+    /**
+     * Registers an [ILiveUpdateInterceptor] that the SDK consults - after parsing, before any
+     * rendering / tracking / listener dispatch - to decide whether to proceed with an incoming
+     * Live Update. Only one interceptor is active at a time; setting a new one replaces the
+     * previous. Pass `null` to clear (the SDK then always proceeds).
+     */
+    @JvmStatic
+    fun setLiveUpdateInterceptor(interceptor: ILiveUpdateInterceptor?) {
+        liveUpdateInterceptor = interceptor
+    }
+
+    /** Returns the currently-registered [ILiveUpdateInterceptor], or `null` if none. */
+    @JvmStatic
+    fun getLiveUpdateInterceptor(): ILiveUpdateInterceptor? = liveUpdateInterceptor
+
+    /**
+     * Asks the registered [ILiveUpdateInterceptor] whether the SDK should proceed with
+     * [payload]. Returns `true` when no interceptor is registered (default: proceed). Any
+     * exception thrown by the interceptor is caught and treated as "proceed" so a buggy
+     * interceptor never silently swallows Live Updates.
+     */
+    internal fun shouldDisplay(payload: LiveUpdatePayload): Boolean {
+        val interceptor = liveUpdateInterceptor ?: return true
+        return try {
+            interceptor.shouldDisplayLiveUpdate(payload)
+        } catch (e: Exception) {
+            Log.warning(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "ILiveUpdateInterceptor threw an exception; proceeding with the Live Update: ${e.localizedMessage}"
+            )
+            true
+        }
+    }
 
     // ---------- Pattern 3: manual Live Update event tracking ----------
 
