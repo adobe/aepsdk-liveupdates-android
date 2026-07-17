@@ -58,7 +58,7 @@ class LiveUpdateHandlerImpl(
     override fun handleLiveUpdatePush(context: Context, message: RemoteMessage) {
         val payload = LiveUpdatePayload.parse(message)
         if (payload == null) {
-            Log.warning(LOG_TAG, TAG, "Dropping Live Update: failed to parse payload.")
+            Log.warning(LiveUpdatesConstants.LOG_TAG, TAG, "Dropping Live Update: failed to parse payload.")
             return
         }
         postLiveUpdate(context, payload)
@@ -74,7 +74,7 @@ class LiveUpdateHandlerImpl(
         val style = styleProvider.provideStyle(payload)
         if (style == null) {
             Log.warning(
-                LOG_TAG,
+                LiveUpdatesConstants.LOG_TAG,
                 TAG,
                 "Dropping Live Update id=${payload.notificationId}: style provider returned null."
             )
@@ -116,7 +116,7 @@ class LiveUpdateHandlerImpl(
 
         checkPromotionEligibility(context, notification)?.let { reason ->
             Log.warning(
-                LOG_TAG,
+                LiveUpdatesConstants.LOG_TAG,
                 TAG,
                 "Live Update will post as a NORMAL ongoing notification (not promoted to chip). Reason: $reason"
             )
@@ -162,6 +162,9 @@ class LiveUpdateHandlerImpl(
         val dismissIntent = Intent(context, LiveUpdateInteractionReceiver::class.java).apply {
             action = LiveUpdateInteractionReceiver.ACTION_DISMISS
             addTrackingExtras(payload)
+            // Serialize the full payload so onDismissed can re-hydrate it, even if the app
+            // process was killed between post and dismiss (only the intent extras survive).
+            putExtra(LiveUpdates.EXTRA_PAYLOAD, payload.toEnvelopeJson())
         }
         return PendingIntent.getBroadcast(
             context,
@@ -189,7 +192,7 @@ class LiveUpdateHandlerImpl(
             val label = button.optString(KEY_ACTION_BUTTON_LABEL).takeIf { it.isNotEmpty() }
             if (label == null) {
                 Log.debug(
-                    LOG_TAG, TAG,
+                    LiveUpdatesConstants.LOG_TAG, TAG,
                     "Skipping action button at index $i: missing 'label' field."
                 )
                 continue
@@ -313,7 +316,6 @@ class LiveUpdateHandlerImpl(
 
     private companion object {
         const val TAG = "LiveUpdateHandlerImpl"
-        const val LOG_TAG = "LiveUpdateHandlerImpl"
         const val DEFAULT_CHANNEL_NAME = "Live Updates"
         const val DEFAULT_CHANNEL_DESCRIPTION = "Status-bar chips for AJO Live Updates"
 

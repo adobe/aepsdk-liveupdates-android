@@ -24,7 +24,8 @@ import android.content.Intent
  * Delegates to [LiveUpdates.handleNotificationResponse] with `applicationOpened = false`
  * and `customActionId = ` [LiveUpdates.ACTION_ID_DISMISS], which lands as
  * `liveUpdateTracking.customAction` with `pushNotificationTracking.customAction.actionID = "Dismiss"`
- * in the outbound XDM.
+ * in the outbound XDM. Then invokes [ILiveUpdateListener.onDismissed] with the re-hydrated
+ * payload via [LiveUpdates.notifyDismissed].
  */
 class LiveUpdateInteractionReceiver : BroadcastReceiver() {
 
@@ -36,6 +37,7 @@ class LiveUpdateInteractionReceiver : BroadcastReceiver() {
             applicationOpened = false,
             customActionId = LiveUpdates.ACTION_ID_DISMISS
         )
+        LiveUpdates.notifyDismissed(intent)
     }
 
     companion object {

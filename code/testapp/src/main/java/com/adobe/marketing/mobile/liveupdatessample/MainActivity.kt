@@ -45,6 +45,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.google.firebase.messaging.FirebaseMessaging
+import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload
+import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdates
+import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
 
@@ -187,6 +190,32 @@ private fun LiveUpdateInfoScreen(fcmToken: String?, onOpenTopics: () -> Unit) {
         Spacer(modifier = Modifier.height(24.dp))
         Button(onClick = onOpenTopics) {
             Text("Manage FCM topics")
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        // Quick Connect: pairs with Assurance without a QR code / deeplink session id.
+        // No-ops on non-debuggable builds or if a session is already active.
+        Button(onClick = { Assurance.startSession() }) {
+            Text("Start Assurance session (Quick Connect)")
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        // TEMP DEBUG: exercises the exact render path (postLiveUpdate -> styleProvider ->
+        // notify) with no FCM round-trip, so we can trace chip rendering on the emulator.
+        Button(onClick = {
+            val payload = LiveUpdatePayload.create(
+                notificationId = "local_test_1",
+                channelId = "live_updates_channel",
+                eventType = LiveUpdatePayload.EVENT_TYPE_LOCAL_START,
+                title = "Local test chip",
+                body = "Rendered via triggerLocalLiveUpdate",
+                criticalText = "LIVE",
+                contentState = JSONObject()
+                    .put("custom_key_template_type", "progress")
+                    .put("custom_key_journey_progress", 10)
+            )
+            val ok = LiveUpdates.triggerLocalLiveUpdate(context, payload)
+            Toast.makeText(context, "triggerLocalLiveUpdate=$ok", Toast.LENGTH_LONG).show()
+        }) {
+            Text("TEST: local chip")
         }
     }
 }

@@ -92,7 +92,9 @@ class LiveUpdatesApplication : Application() {
                 FirebaseMessaging.getInstance().subscribeToTopic(topic)
                     .addOnCompleteListener { task ->
                         if (task.isSuccessful) {
-                            LiveUpdates.trackTopicSubscribed(topic, payload.notificationId)
+                            // Pass the full payload so the subscribe event correlates to the
+                            // originating campaign / journey via the push's _xdm.
+                            LiveUpdates.trackTopicSubscribed(topic, payload)
                             Log.d(TAG, "Subscribed to topic '$topic' (triggered by Live Update start).")
                         } else {
                             Log.w(TAG, "subscribeToTopic($topic) failed: ${task.exception?.localizedMessage}")
@@ -108,20 +110,34 @@ class LiveUpdatesApplication : Application() {
                 Log.d(TAG, "Live Update END: id=${payload.notificationId} (chip will dismiss soon)")
                 // Mirror of onStart: unsubscribe from the topic when the Live Update ends
                 // and dispatch the corresponding tracking event on success.
-                val topic = payload.topicName ?: return
-                FirebaseMessaging.getInstance().unsubscribeFromTopic(topic)
-                    .addOnCompleteListener { task ->
-                        if (task.isSuccessful) {
-                            LiveUpdates.trackTopicUnsubscribed(topic, payload.notificationId)
-                            Log.d(TAG, "Unsubscribed from topic '$topic' (triggered by Live Update end).")
-                        } else {
-                            Log.w(TAG, "unsubscribeFromTopic($topic) failed: ${task.exception?.localizedMessage}")
-                        }
-                    }
+                unSubscribeFromTopic(payload)
+            }
+
+            override fun onDismissed(payload: LiveUpdatePayload) {
+                Log.d(
+                    TAG,
+                    "Live Update DISMISSED: id=${payload.notificationId} title='${payload.title}' " +
+                        "event=${payload.eventType}"
+                )
+                unSubscribeFromTopic(payload)
             }
         })
     }
 
+    private fun unSubscribeFromTopic(payload: LiveUpdatePayload) {
+        val topic = payload.topicName ?: return
+        FirebaseMessaging.getInstance().unsubscribeFromTopic(topic)
+            .addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    // Pass the full payload so the unsubscribe event correlates to the
+                    // originating campaign / journey via the push's _xdm.
+                    LiveUpdates.trackTopicUnsubscribed(topic, payload)
+                    Log.d(TAG, "Unsubscribed from topic '$topic' (triggered by Live Update end).")
+                } else {
+                    Log.w(TAG, "unsubscribeFromTopic($topic) failed: ${task.exception?.localizedMessage}")
+                }
+            }
+    }
     private companion object {
         const val TAG = "LiveUpdateSample"
     }
