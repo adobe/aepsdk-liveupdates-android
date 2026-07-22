@@ -39,7 +39,7 @@ import org.json.JSONObject
  * ```
  *
  * Drops the push (warning log, no notification posted) in these cases:
- *  - payload fails to parse (any required field missing: notification_id, channel_id, event_type, title)
+ *  - payload fails to parse (any required field missing: notification_id, notification_channel_id, event_type, title)
  *  - style provider returns `null`
  *
  * After a successful `notify(...)`, dispatches the Live Update event tracking
