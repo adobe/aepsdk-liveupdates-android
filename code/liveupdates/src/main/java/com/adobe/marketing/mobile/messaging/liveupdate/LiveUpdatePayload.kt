@@ -29,7 +29,7 @@ import org.json.JSONObject
  *
  * Schema v1.1 required fields (parse returns null when any is missing or empty):
  *  - `notification_id`
- *  - `channel_id`
+ *  - `notification_channel_id`
  *  - `event_type`
  *  - `title`
  */
@@ -139,7 +139,7 @@ class LiveUpdatePayload private constructor(
          * intermediate `RemoteMessage`. Primary use case is
          * [LiveUpdates.triggerLocalLiveUpdate], where the host app raises a Live Update
          * chip programmatically. Required inputs match the envelope's required fields
-         * (`notification_id`, `channel_id`, `event_type`, `title`); everything else is
+         * (`notification_id`, `notification_channel_id`, `event_type`, `title`); everything else is
          * optional and defaults to `null` / absent.
          */
         @JvmStatic
@@ -188,7 +188,7 @@ class LiveUpdatePayload private constructor(
         /**
          * Parses [message] into a [LiveUpdatePayload]. Returns `null` when the envelope is
          * absent, malformed, or missing any required field (`notification_id`,
-         * `channel_id`, `event_type`, `title`).
+         * `notification_channel_id`, `event_type`, `title`).
          */
         @JvmStatic
         fun parse(message: RemoteMessage): LiveUpdatePayload? {

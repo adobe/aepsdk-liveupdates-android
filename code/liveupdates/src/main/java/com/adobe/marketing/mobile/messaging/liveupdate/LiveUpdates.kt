@@ -13,7 +13,6 @@ package com.adobe.marketing.mobile.messaging.liveupdate
 
 import android.content.Context
 import android.content.Intent
-import com.adobe.marketing.mobile.AdobeCallback
 import com.adobe.marketing.mobile.Event
 import com.adobe.marketing.mobile.EventSource
 import com.adobe.marketing.mobile.EventType
