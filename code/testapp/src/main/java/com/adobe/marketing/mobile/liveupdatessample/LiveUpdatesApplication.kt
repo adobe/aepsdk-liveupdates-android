@@ -27,6 +27,7 @@ import com.adobe.marketing.mobile.messaging.liveupdate.ILiveUpdateListener
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdateHandlerImpl
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdates
+import com.google.firebase.messaging.FirebaseMessaging
 
 class LiveUpdatesApplication : Application() {
 
@@ -47,9 +48,10 @@ class LiveUpdatesApplication : Application() {
             Assurance.EXTENSION
         )
         MobileCore.registerExtensions(extensions) {
-            // TODO: replace with the environment file id from your Adobe Data Collection
-            // (Launch) property before running the sample app against real infrastructure.
-            MobileCore.configureWithAppID("YOUR_ENVIRONMENT_FILE_ID")
+            // TODO: replace the placeholder below with the environment file id from your Adobe
+            // Data Collection (Launch) property before running the sample against real
+            // infrastructure. Without a valid id, events will not reach Adobe services.
+            MobileCore.configureWithAppID("<YOUR_ENVIRONMENT_FILE_ID>")
             MobileCore.lifecycleStart(null)
 
             // Primary identity demonstration. AJO uses this to correlate server-side
@@ -67,7 +69,15 @@ class LiveUpdatesApplication : Application() {
         // Auto-mode integration: register a LiveUpdateHandlerImpl with the app's
         // ILiveUpdateStyleProvider. The SDK takes over rendering on every incoming push
         // whose data map carries `adb_liveupdate_data`.
-        Messaging.setLiveUpdateHandler(LiveUpdateHandlerImpl(SampleLiveUpdateStyleProvider()))
+        Messaging.setLiveUpdateHandler(LiveUpdateHandlerImpl(SampleLiveUpdateStyleProvider(applicationContext)))
+
+        // Interceptor demo: suppress Live Updates the user already dismissed. The store records
+        // dismissed ids (see onDismissed below); the interceptor vetoes any incoming Live Update
+        // whose id is in that set. Gated by SampleLiveUpdateInterceptor.DISCARD_DISMISSED_UPDATES.
+        val dismissedStore = DismissedLiveUpdateStore(applicationContext)
+        LiveUpdates.setLiveUpdateInterceptor(
+            SampleLiveUpdateInterceptor(applicationContext, dismissedStore)
+        )
 
         // Optional: react to Live Update lifecycle events from the app side. The generic
         // onLiveUpdateReceived fires for every push; onStart / onUpdate / onEnd fire next
@@ -82,6 +92,24 @@ class LiveUpdatesApplication : Application() {
 
             override fun onStart(payload: LiveUpdatePayload) {
                 Log.d(TAG, "Live Update START: id=${payload.notificationId} title='${payload.title}'")
+                // On start, subscribe this device to the Live Update's topic so future
+                // broadcast pushes for the same activity reach us. Topic subscribe /
+                // unsubscribe is an application-side responsibility; the SDK exposes
+                // tracking dispatch (trackTopicSubscribed) so the subscribe event lands in
+                // AJO reporting alongside the lifecycle events. Fired only on Firebase
+                // success so reporting counts reflect real server-side subscription state.
+                val topic = payload.topicName ?: return
+                FirebaseMessaging.getInstance().subscribeToTopic(topic)
+                    .addOnCompleteListener { task ->
+                        if (task.isSuccessful) {
+                            // Pass the full payload so the subscribe event correlates to the
+                            // originating campaign / journey via the push's _xdm.
+                            LiveUpdates.trackTopicSubscribed(topic, payload)
+                            Log.d(TAG, "Subscribed to topic '$topic' (triggered by Live Update start).")
+                        } else {
+                            Log.w(TAG, "subscribeToTopic($topic) failed: ${task.exception?.localizedMessage}")
+                        }
+                    }
             }
 
             override fun onUpdate(payload: LiveUpdatePayload) {
@@ -90,10 +118,41 @@ class LiveUpdatesApplication : Application() {
 
             override fun onEnd(payload: LiveUpdatePayload) {
                 Log.d(TAG, "Live Update END: id=${payload.notificationId} (chip will dismiss soon)")
+                // Mirror of onStart: unsubscribe from the topic when the Live Update ends
+                // and dispatch the corresponding tracking event on success.
+                unsubscribeFromTopic(payload)
+            }
+
+            override fun onDismissed(payload: LiveUpdatePayload) {
+                Log.d(
+                    TAG,
+                    "Live Update DISMISSED: id=${payload.notificationId} title='${payload.title}' " +
+                        "event=${payload.eventType}"
+                )
+                // Remember the dismissal so the interceptor keeps this activity's future pushes
+                // off-screen. Gated by the same feature flag as the interceptor.
+                if (SampleLiveUpdateInterceptor.DISCARD_DISMISSED_UPDATES) {
+                    dismissedStore.markDismissed(payload.notificationId)
+                }
+                unsubscribeFromTopic(payload)
             }
         })
     }
 
+    private fun unsubscribeFromTopic(payload: LiveUpdatePayload) {
+        val topic = payload.topicName ?: return
+        FirebaseMessaging.getInstance().unsubscribeFromTopic(topic)
+            .addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    // Pass the full payload so the unsubscribe event correlates to the
+                    // originating campaign / journey via the push's _xdm.
+                    LiveUpdates.trackTopicUnsubscribed(topic, payload)
+                    Log.d(TAG, "Unsubscribed from topic '$topic' (triggered by Live Update end).")
+                } else {
+                    Log.w(TAG, "unsubscribeFromTopic($topic) failed: ${task.exception?.localizedMessage}")
+                }
+            }
+    }
     private companion object {
         const val TAG = "LiveUpdateSample"
     }

@@ -56,4 +56,15 @@ dependencies {
     // firebase-messaging on the runtime classpath; the SDK only needs the type at
     // compile time.
     compileOnly("com.google.firebase:firebase-messaging:23.4.1")
+
+    // testImplementation dependencies provided by aep-library:
+    // JUNIT, MOCKITO_CORE, MOCKITO_INLINE, JSON, MOCKITO_KOTLIN
+    testImplementation("com.google.firebase:firebase-messaging:23.4.1")
+    // need to use robolectric 4.14 to get android 35 support in unit tests
+    testImplementation("org.robolectric:robolectric:4.14")
+    // specify byte buddy version to fix compatibility issue with jdk 21
+    testImplementation("org.mockito:mockito-inline:5.2.0") {
+        exclude(group = "net.bytebuddy", module = "byte-buddy")
+    }
+    testImplementation("net.bytebuddy:byte-buddy:1.14.17")
 }

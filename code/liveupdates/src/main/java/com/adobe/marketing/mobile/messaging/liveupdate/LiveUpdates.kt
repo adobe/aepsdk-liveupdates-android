@@ -12,14 +12,16 @@
 package com.adobe.marketing.mobile.messaging.liveupdate
 
 import android.content.Context
-import com.adobe.marketing.mobile.AdobeCallback
+import android.content.Intent
 import com.adobe.marketing.mobile.Event
 import com.adobe.marketing.mobile.EventSource
 import com.adobe.marketing.mobile.EventType
+import com.adobe.marketing.mobile.Messaging
 import com.adobe.marketing.mobile.MobileCore
 import com.adobe.marketing.mobile.services.Log
-import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.RemoteMessage
+import org.json.JSONException
+import org.json.JSONObject
 
 /**
  * Public facade for the Live Updates SDK.
@@ -31,7 +33,9 @@ import com.google.firebase.messaging.RemoteMessage
  * Surface:
  *  - [setLiveUpdateListener] / [getLiveUpdateListener]: register a hook for start/update/end Live Update events.
  *  - [trackLiveUpdateEvent]: Pattern 3 (manual) entry point that fires Live Update event tracking + listener invocation when the app builds and posts the notification itself.
- *  - [subscribeToTopic] / [unsubscribeFromTopic]: FCM topic subscription helpers for the broadcast use case.
+ *  - [addPushTrackingDetails]: attaches Live Update tracking extras to an [Intent] so manual-mode apps can wire their own PendingIntents.
+ *  - [handleNotificationResponse]: fires tap / action / dismiss tracking. Called by the SDK's own tracker Activity and dismiss receiver, and by manual-mode apps from their target Activity.
+ *  - [trackTopicSubscribed] / [trackTopicUnsubscribed]: dispatch Live Update tracking events after the host application has subscribed / unsubscribed the device from an FCM topic. The subscribe / unsubscribe mechanic itself lives in the application layer.
  *
  * Pattern 2 (mixed) integration does NOT need an entry point on this facade. Apps with their
  * own [com.google.firebase.messaging.FirebaseMessagingService] call
@@ -51,8 +55,27 @@ object LiveUpdates {
     // XDM schema field names - match the canonical AJO Push Tracking Experience Event Schema,
     // which is the same schema the iOS Live Activities tracking flow populates in production.
     private const val XDM_KEY_EVENT_TYPE = "eventType"
-    private const val XDM_VALUE_PUSH_TRACKING_APPLICATION_OPENED = "pushTracking.applicationOpened"
+    private const val XDM_VALUE_LIVE_UPDATE_TRACKING_RECEIVED = "liveUpdateTracking.received"
+
+    // pushChannelContext.liveActivity.event values dispatched in the outbound XDM.
+    // These are the reporting-facing labels; they intentionally differ from the
+    // incoming envelope's raw event_type values (start / update / end) so AJO reporting
+    // can filter Live Update lifecycle events without a substring match against generic
+    // "start" / "end" strings that might appear in other event schemas.
+    private const val EVENT_VALUE_LIVE_UPDATE_START = "liveupdate_start"
+    private const val EVENT_VALUE_LIVE_UPDATE_UPDATE = "liveupdate_update"
+    private const val EVENT_VALUE_LIVE_UPDATE_END = "liveupdate_end"
+    // Topic subscription tracking values. Dispatched via trackTopicSubscribed /
+    // trackTopicUnsubscribed after the host app completes the corresponding
+    // FirebaseMessaging call.
+    private const val EVENT_VALUE_TOPIC_SUBSCRIBED = "topic_subscribed"
+    private const val EVENT_VALUE_TOPIC_UNSUBSCRIBED = "topic_unsubscribed"
+    private const val XDM_VALUE_LIVE_UPDATE_TRACKING_TOPIC = "liveUpdateTracking.topic"
+    private const val XDM_VALUE_LIVE_UPDATE_TRACKING_APPLICATION_OPENED = "liveUpdateTracking.applicationOpened"
+    private const val XDM_VALUE_LIVE_UPDATE_TRACKING_CUSTOM_ACTION = "liveUpdateTracking.customAction"
     private const val XDM_KEY_PUSH_NOTIFICATION_TRACKING = "pushNotificationTracking"
+    private const val XDM_KEY_CUSTOM_ACTION = "customAction"
+    private const val XDM_KEY_ACTION_ID = "actionID"
     private const val XDM_KEY_PUSH_PROVIDER = "pushProvider"
     private const val XDM_KEY_PUSH_PROVIDER_MESSAGE_ID = "pushProviderMessageID"
     private const val XDM_KEY_EXPERIENCE = "_experience"
@@ -81,8 +104,31 @@ object LiveUpdates {
     private const val META_KEY_DATASET_ID = "datasetId"
     private const val CONFIG_KEY_EVENT_DATASET = "messaging.eventDataset"
 
+    // Intent extras injected onto Live Update tap / dismiss / action-button PendingIntents.
+    // Distinct from Messaging's tracking extras so `Messaging.handleNotificationResponse`
+    // and `LiveUpdates.handleNotificationResponse` pick up only their own intents when
+    // both SDKs are installed side by side.
+    internal const val EXTRA_NOTIFICATION_ID = "adb_liveupdate_notification_id"
+    internal const val EXTRA_XDM = "adb_liveupdate_xdm"
+    internal const val EXTRA_EVENT_TYPE = "adb_liveupdate_event_type"
+    internal const val EXTRA_CHANNEL_ID = "adb_liveupdate_channel_id"
+    internal const val EXTRA_ACTION_URI = "adb_liveupdate_action_uri"
+    internal const val EXTRA_ACTION_ID = "adb_liveupdate_action_id"
+    // Full payload serialized as envelope JSON (see LiveUpdatePayload.toEnvelopeJson), carried
+    // on interaction intents so the SDK can re-hydrate the complete payload for onDismissed
+    // even after process death.
+    internal const val EXTRA_PAYLOAD = "adb_liveupdate_payload"
+
+    /** Custom action id used when the notification is dismissed by the user. */
+    const val ACTION_ID_DISMISS = "Dismiss"
+
     @Volatile
     private var cachedEventDatasetId: String? = null
+
+    // App-registered gate consulted before rendering/tracking an incoming Live Update. Held
+    // directly on the facade (no separate store) since only this class reads and writes it.
+    @Volatile
+    private var liveUpdateInterceptor: ILiveUpdateInterceptor? = null
 
     init {
         // Listen for Configuration response events so we can cache messaging.eventDataset and
@@ -98,7 +144,7 @@ object LiveUpdates {
             if (!datasetId.isNullOrEmpty()) {
                 cachedEventDatasetId = datasetId
                 Log.debug(
-                    SELF_TAG, SELF_TAG,
+                    LiveUpdatesConstants.LOG_TAG, SELF_TAG,
                     "Cached $CONFIG_KEY_EVENT_DATASET for Live Update tracking: $datasetId"
                 )
             }
@@ -125,6 +171,42 @@ object LiveUpdates {
     @JvmStatic
     fun getLiveUpdateListener(): ILiveUpdateListener? = LiveUpdateListenerStore.getListener()
 
+    // ---------- Interceptor registration ----------
+
+    /**
+     * Registers an [ILiveUpdateInterceptor] that the SDK consults - after parsing, before any
+     * rendering / tracking / listener dispatch - to decide whether to proceed with an incoming
+     * Live Update. Only one interceptor is active at a time; setting a new one replaces the
+     * previous. Pass `null` to clear (the SDK then always proceeds).
+     */
+    @JvmStatic
+    fun setLiveUpdateInterceptor(interceptor: ILiveUpdateInterceptor?) {
+        liveUpdateInterceptor = interceptor
+    }
+
+    /** Returns the currently-registered [ILiveUpdateInterceptor], or `null` if none. */
+    @JvmStatic
+    fun getLiveUpdateInterceptor(): ILiveUpdateInterceptor? = liveUpdateInterceptor
+
+    /**
+     * Asks the registered [ILiveUpdateInterceptor] whether the SDK should proceed with
+     * [payload]. Returns `true` when no interceptor is registered (default: proceed). Any
+     * exception thrown by the interceptor is caught and treated as "proceed" so a buggy
+     * interceptor never silently swallows Live Updates.
+     */
+    internal fun shouldDisplay(payload: LiveUpdatePayload): Boolean {
+        val interceptor = liveUpdateInterceptor ?: return true
+        return try {
+            interceptor.shouldDisplayLiveUpdate(payload)
+        } catch (e: Exception) {
+            Log.warning(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "ILiveUpdateInterceptor threw an exception; proceeding with the Live Update: ${e.localizedMessage}"
+            )
+            true
+        }
+    }
+
     // ---------- Pattern 3: manual Live Update event tracking ----------
 
     /**
@@ -142,7 +224,7 @@ object LiveUpdates {
         val payload = LiveUpdatePayload.parse(message)
         if (payload == null) {
             Log.warning(
-                SELF_TAG, SELF_TAG,
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
                 "trackLiveUpdateEvent: failed to parse payload; skipping tracking + listener dispatch."
             )
             return
@@ -151,52 +233,243 @@ object LiveUpdates {
         invokeListener(payload)
     }
 
-    // ---------- Topic subscribe / unsubscribe (broadcast use case) ----------
-
     /**
-     * Subscribes the device to an FCM topic so it can receive broadcast Live Updates. Thin
-     * wrapper around [FirebaseMessaging.subscribeToTopic]; the SDK does not maintain a
-     * local record of subscriptions, so callers that need a persisted set should track it
-     * themselves.
+     * TODO(ergonomics): callers must build a full [LiveUpdatePayload] up front (16 fields
+     * on the factory). If real-world usage settles into "everyone sets only 4-5 of them",
+     * layer a lighter overload on top (envelope-JSON string, builder, or partial-payload
+     * DSL). Deferred until we see how apps actually adopt the API.
      *
-     * @param topic the FCM topic name (no `/topics/` prefix)
-     * @param callback invoked with `true` on success, `false` on FCM failure; may be `null`
+     * Renders a Live Update chip locally (no FCM push required) using the passed [payload],
+     * dispatches the receive lifecycle tracking event, and invokes any registered
+     * [ILiveUpdateListener]. Intended for cases where the host application starts a Live
+     * Update from local state - a workout timer, a step-by-step onboarding, a self-initiated
+     * download - and wants the chip + tracking without a round trip through the server.
+     *
+     * The passed payload's `event_type` drives the outbound tracking value. Use
+     * [LiveUpdatePayload.EVENT_TYPE_LOCAL_START] to mark the initial locally-raised chip so
+     * server-side reporting can distinguish it from an FCM `start`.
+     *
+     * @return `true` if the SDK's canonical [LiveUpdateHandlerImpl] was registered via
+     *   [Messaging.setLiveUpdateHandler] and rendering ran; `false` if the registered
+     *   handler is a custom implementation the SDK cannot invoke directly (in that case
+     *   the host app should render the notification itself and call [trackLiveUpdateEvent]).
      */
     @JvmStatic
-    @JvmOverloads
-    fun subscribeToTopic(topic: String, callback: AdobeCallback<Boolean>? = null) {
-        FirebaseMessaging.getInstance().subscribeToTopic(topic).addOnCompleteListener { task ->
-            val success = task.isSuccessful
-            if (!success) {
-                Log.warning(
-                    SELF_TAG, SELF_TAG,
-                    "subscribeToTopic($topic) failed: ${task.exception?.localizedMessage}"
-                )
-            }
-            callback?.call(success)
+    fun triggerLocalLiveUpdate(context: Context, payload: LiveUpdatePayload): Boolean {
+        val handler = Messaging.getLiveUpdateHandler()
+        if (handler !is LiveUpdateHandlerImpl) {
+            Log.warning(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "triggerLocalLiveUpdate requires the canonical LiveUpdateHandlerImpl to be " +
+                    "registered via Messaging.setLiveUpdateHandler(...). Skipping."
+            )
+            return false
         }
+        handler.postLiveUpdate(context, payload)
+        return true
+    }
+
+    // ---------- Interaction tracking (tap / action / dismiss) ----------
+
+    /**
+     * Attaches Live Update tracking extras to [intent] so a downstream call to
+     * [handleNotificationResponse] can reconstruct enough context to dispatch tracking.
+     * Manual-mode apps that build their own PendingIntents for a Live Update chip should
+     * call this on every intent whose interaction they want tracked.
+     *
+     * The SDK's own tracker Activity and dismiss receiver use the same extras internally,
+     * so calling this from a manual-mode integration produces identical tracking output.
+     *
+     * @return `true` if the extras were added; `false` if [intent] is null or [message] is
+     *         not a Live Update push.
+     */
+    @JvmStatic
+    fun addPushTrackingDetails(intent: Intent?, message: RemoteMessage?): Boolean {
+        if (intent == null || message == null) return false
+        val payload = LiveUpdatePayload.parse(message) ?: return false
+        intent.putExtra(EXTRA_NOTIFICATION_ID, payload.notificationId)
+        intent.putExtra(EXTRA_EVENT_TYPE, payload.eventType)
+        payload.topicName?.let { intent.putExtra(EXTRA_CHANNEL_ID, it) }
+        payload.xdm?.let { intent.putExtra(EXTRA_XDM, it.toString()) }
+        return true
     }
 
     /**
-     * Unsubscribes the device from an FCM topic. Thin wrapper around
-     * [FirebaseMessaging.unsubscribeFromTopic].
+     * Dispatches a Live Update interaction tracking event. Reads the extras placed on
+     * [intent] by [addPushTrackingDetails] and fires a tap / action-button / dismiss event
+     * to Edge. No-op when the intent carries no Live Update tracking extras.
      *
-     * @param topic the FCM topic name (no `/topics/` prefix)
-     * @param callback invoked with `true` on success, `false` on FCM failure; may be `null`
+     * Called by the SDK's own tracker Activity (for tap and action-button clicks) and its
+     * dismiss receiver. Manual-mode apps that own their target Activity should also call
+     * this in `onCreate` / `onNewIntent` after building intents with [addPushTrackingDetails].
+     *
+     * @param intent            the interaction intent carrying Live Update tracking extras
+     * @param applicationOpened `true` for a notification tap (chip body); `false` for
+     *                          action-button clicks and dismissals
+     * @param customActionId    non-null for action-button clicks (button label) or dismissal
+     *                          ([ACTION_ID_DISMISS]); `null` for a plain tap
+     * @return `true` if a tracking event was dispatched; `false` if the intent carried no
+     *         Live Update extras
      */
     @JvmStatic
     @JvmOverloads
-    fun unsubscribeFromTopic(topic: String, callback: AdobeCallback<Boolean>? = null) {
-        FirebaseMessaging.getInstance().unsubscribeFromTopic(topic).addOnCompleteListener { task ->
-            val success = task.isSuccessful
-            if (!success) {
-                Log.warning(
-                    SELF_TAG, SELF_TAG,
-                    "unsubscribeFromTopic($topic) failed: ${task.exception?.localizedMessage}"
-                )
-            }
-            callback?.call(success)
+    fun handleNotificationResponse(
+        intent: Intent?,
+        applicationOpened: Boolean,
+        customActionId: String? = null
+    ): Boolean {
+        if (intent == null) return false
+        val notificationId = intent.getStringExtra(EXTRA_NOTIFICATION_ID)
+        if (notificationId.isNullOrEmpty()) {
+            // Not one of ours; leaves standard-push tracking to Messaging.handleNotificationResponse.
+            return false
         }
+        val channelId = intent.getStringExtra(EXTRA_CHANNEL_ID)
+        val xdmString = intent.getStringExtra(EXTRA_XDM)
+        val xdm = xdmString?.takeIf { it.isNotEmpty() }?.let { raw ->
+            try {
+                JSONObject(raw)
+            } catch (e: JSONException) {
+                Log.debug(
+                    LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                    "handleNotificationResponse: unable to parse _xdm extra: ${e.localizedMessage}"
+                )
+                null
+            }
+        }
+        dispatchInteractionTracking(
+            notificationId = notificationId,
+            topicName = channelId,
+            incomingXdm = xdm,
+            applicationOpened = applicationOpened,
+            customActionId = customActionId
+        )
+        return true
+    }
+
+    // ---------- Topic subscription tracking ----------
+
+    /**
+     * Dispatches a tracking event indicating the device has successfully subscribed to
+     * an FCM topic. Fired by the host application after
+     * [com.google.firebase.messaging.FirebaseMessaging.subscribeToTopic] completes
+     * successfully. Topic subscribe / unsubscribe themselves are intentionally NOT part of
+     * the SDK's public API - the application owns that mechanic - the SDK only exposes the
+     * tracking dispatch so subscribe events land in AJO reporting alongside the receive
+     * lifecycle events.
+     *
+     * Outbound XDM: `pushChannelContext.liveActivity.event = "topic_subscribed"`,
+     * `channelID = <topic>`, `liveActivityID` populated when a [notificationId] is provided
+     * (e.g. when the subscription is triggered from an `onStart` Live Update listener).
+     *
+     * @param topic the FCM topic name (no `/topics/` prefix)
+     * @param notificationId the Live Update `notification_id` that triggered the
+     *   subscription, or `null` when the subscription is not tied to a specific chip
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun trackTopicSubscribed(topic: String, notificationId: String? = null) {
+        dispatchTopicTracking(
+            topic = topic,
+            event = EVENT_VALUE_TOPIC_SUBSCRIBED,
+            notificationId = notificationId,
+            incomingXdm = null
+        )
+    }
+
+    /**
+     * Live-Update-triggered variant of [trackTopicSubscribed]. Use this when the subscription
+     * was raised in response to a Live Update (e.g. from an `onStart` callback): the full
+     * [payload] is threaded in so the topic event correlates to the originating campaign /
+     * journey. Specifically, `pushProviderMessageID` + `liveActivityID` come from
+     * [payload]'s `notificationId`, and the AJO passthrough mixins (`messageExecution`,
+     * `decisioning`, `campaignID`, ...) from [payload]'s `_xdm` are merged into the outbound
+     * XDM - matching the correlation the lifecycle start/update/end events already carry.
+     *
+     * @param topic the FCM topic the device was subscribed to (no `/topics/` prefix)
+     * @param payload the Live Update payload that triggered the subscription
+     */
+    @JvmStatic
+    fun trackTopicSubscribed(topic: String, payload: LiveUpdatePayload) {
+        dispatchTopicTracking(
+            topic = topic,
+            event = EVENT_VALUE_TOPIC_SUBSCRIBED,
+            notificationId = payload.notificationId,
+            incomingXdm = payload.xdm
+        )
+    }
+
+    /**
+     * Dispatches a tracking event indicating the device has successfully unsubscribed
+     * from an FCM topic. Companion to [trackTopicSubscribed] - fire after
+     * [com.google.firebase.messaging.FirebaseMessaging.unsubscribeFromTopic] completes
+     * successfully.
+     *
+     * Outbound XDM: `pushChannelContext.liveActivity.event = "topic_unsubscribed"`,
+     * `channelID = <topic>`, `liveActivityID` populated when a [notificationId] is provided.
+     *
+     * @param topic the FCM topic name
+     * @param notificationId the Live Update `notification_id` that triggered the
+     *   unsubscription, or `null` when the unsubscription is not tied to a specific chip
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun trackTopicUnsubscribed(topic: String, notificationId: String? = null) {
+        dispatchTopicTracking(
+            topic = topic,
+            event = EVENT_VALUE_TOPIC_UNSUBSCRIBED,
+            notificationId = notificationId,
+            incomingXdm = null
+        )
+    }
+
+    /**
+     * Live-Update-triggered variant of [trackTopicUnsubscribed]. Use this when the
+     * unsubscription was raised in response to a Live Update (e.g. from an `onEnd` callback):
+     * the full [payload] is threaded in so the topic event correlates to the originating
+     * campaign / journey, exactly as [trackTopicSubscribed] does for the subscribe case.
+     *
+     * @param topic the FCM topic the device was unsubscribed from (no `/topics/` prefix)
+     * @param payload the Live Update payload that triggered the unsubscription
+     */
+    @JvmStatic
+    fun trackTopicUnsubscribed(topic: String, payload: LiveUpdatePayload) {
+        dispatchTopicTracking(
+            topic = topic,
+            event = EVENT_VALUE_TOPIC_UNSUBSCRIBED,
+            notificationId = payload.notificationId,
+            incomingXdm = payload.xdm
+        )
+    }
+
+    /**
+     * Shared dispatch used by [trackTopicSubscribed] and [trackTopicUnsubscribed]. Wraps
+     * the outbound Edge event with the same lifecycle-XDM shape used for start / update /
+     * end, but with the [event] value driving `pushChannelContext.liveActivity.event`.
+     * [incomingXdm] carries the originating push's `_xdm` passthrough (campaign / journey
+     * correlation mixins) for Live-Update-triggered calls; `null` for standalone subscribes.
+     */
+    private fun dispatchTopicTracking(
+        topic: String,
+        event: String,
+        notificationId: String?,
+        incomingXdm: JSONObject?
+    ) {
+        if (topic.isEmpty()) {
+            Log.debug(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "Skipping topic tracking dispatch: topic is empty (event='$event')."
+            )
+            return
+        }
+        dispatchTrackingEvent(
+            xdmEventType = XDM_VALUE_LIVE_UPDATE_TRACKING_TOPIC,
+            notificationId = notificationId,
+            topicName = topic,
+            liveActivityEvent = event,
+            incomingXdm = incomingXdm,
+            customActionId = null
+        )
     }
 
     // ---------- internal helpers (visible to LiveUpdateHandlerImpl) ----------
@@ -225,7 +498,7 @@ object LiveUpdates {
      *         "liveActivity": {
      *           "liveActivityID": "<notification_id>",
      *           "channelID":      "<topic_name>",
-     *           "event":          "start" | "update" | "end"
+     *           "event":          "liveupdate_start" | "liveupdate_update" | "liveupdate_end"
      *         }
      *       }
      *     }
@@ -237,27 +510,105 @@ object LiveUpdates {
         val eventType = payload.eventType
         val isCanonical = eventType == LiveUpdatePayload.EVENT_TYPE_START ||
             eventType == LiveUpdatePayload.EVENT_TYPE_UPDATE ||
-            eventType == LiveUpdatePayload.EVENT_TYPE_END
+            eventType == LiveUpdatePayload.EVENT_TYPE_END ||
+            eventType == LiveUpdatePayload.EVENT_TYPE_LOCAL_START
         if (!isCanonical) {
             Log.debug(
-                SELF_TAG, SELF_TAG,
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
                 "Skipping Live Update event tracking dispatch: event_type='$eventType' is not start/update/end."
             )
             return
         }
-        val xdmMap = buildLiveActivityTrackingXdm(payload)
-        // Add meta.collect.datasetId override when configuration has supplied
-        // messaging.eventDataset, matching Messaging's push tracking event shape.
+        // Map the envelope's raw event_type to the outbound XDM reporting value.
+        // The envelope stays as start / update / end (server + parser contract);
+        // the outbound XDM uses the prefixed liveupdate_* values for AJO reporting.
+        // EVENT_TYPE_LOCAL_START (app-raised locally) reports as liveupdate_start.
+        val liveActivityEventXdmValue = when (eventType) {
+            LiveUpdatePayload.EVENT_TYPE_START,
+            LiveUpdatePayload.EVENT_TYPE_LOCAL_START -> EVENT_VALUE_LIVE_UPDATE_START
+            LiveUpdatePayload.EVENT_TYPE_UPDATE -> EVENT_VALUE_LIVE_UPDATE_UPDATE
+            LiveUpdatePayload.EVENT_TYPE_END -> EVENT_VALUE_LIVE_UPDATE_END
+            else -> return // isCanonical guard above makes this unreachable
+        }
+        dispatchTrackingEvent(
+            xdmEventType = XDM_VALUE_LIVE_UPDATE_TRACKING_RECEIVED,
+            notificationId = payload.notificationId,
+            topicName = payload.topicName,
+            liveActivityEvent = liveActivityEventXdmValue,
+            incomingXdm = payload.xdm,
+            customActionId = null
+        )
+    }
+
+    /**
+     * Dispatches an interaction tracking event for a Live Update - notification tap, action
+     * button click, or dismissal. Reconstructs the tracking XDM from the extras carried on
+     * the interaction [Intent] (see [addPushTrackingDetails] for how the extras are set).
+     *
+     * The top-level `eventType` is chosen from [applicationOpened] and [customActionId]:
+     *  - `customActionId` non-null (action button click or dismiss) - "liveUpdateTracking.customAction"
+     *  - `applicationOpened` true (notification tap) - "liveUpdateTracking.applicationOpened"
+     *  - otherwise - no dispatch (nothing to track)
+     *
+     * Interaction events omit `pushChannelContext.liveActivity.event`; only the lifecycle
+     * receive dispatch fills that field. Otherwise a tap or dismiss occurring during the
+     * `start` push would be double-counted against the "start" phase in AJO reporting.
+     */
+    internal fun dispatchInteractionTracking(
+        notificationId: String,
+        topicName: String?,
+        incomingXdm: JSONObject?,
+        applicationOpened: Boolean,
+        customActionId: String?
+    ) {
+        val xdmEventType = when {
+            !customActionId.isNullOrEmpty() -> XDM_VALUE_LIVE_UPDATE_TRACKING_CUSTOM_ACTION
+            applicationOpened -> XDM_VALUE_LIVE_UPDATE_TRACKING_APPLICATION_OPENED
+            else -> {
+                Log.debug(
+                    LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                    "Skipping interaction tracking dispatch: neither applicationOpened nor customActionId set."
+                )
+                return
+            }
+        }
+        dispatchTrackingEvent(
+            xdmEventType = xdmEventType,
+            notificationId = notificationId,
+            topicName = topicName,
+            liveActivityEvent = null,
+            incomingXdm = incomingXdm,
+            customActionId = customActionId
+        )
+    }
+
+    /**
+     * Shared Edge-event build + dispatch for both the receive lifecycle and interaction
+     * events. Adds the [messaging.eventDataset][CONFIG_KEY_EVENT_DATASET] override on
+     * `meta.collect.datasetId` whenever configuration has supplied a value.
+     */
+    private fun dispatchTrackingEvent(
+        xdmEventType: String,
+        notificationId: String?,
+        topicName: String?,
+        liveActivityEvent: String?,
+        incomingXdm: JSONObject?,
+        customActionId: String?
+    ) {
+        val xdmMap = buildLiveActivityTrackingXdm(
+            xdmEventType = xdmEventType,
+            notificationId = notificationId,
+            topicName = topicName,
+            liveActivityEvent = liveActivityEvent,
+            incomingXdm = incomingXdm,
+            customActionId = customActionId
+        )
         val eventData = mutableMapOf<String, Any?>(EVENT_DATA_KEY_XDM to xdmMap)
         cachedEventDatasetId?.let { datasetId ->
             eventData[EVENT_DATA_KEY_META] = mapOf<String, Any?>(
                 META_KEY_COLLECT to mapOf<String, Any?>(META_KEY_DATASET_ID to datasetId)
             )
         }
-        // EventType.EDGE + REQUEST_CONTENT is the contract the Edge extension listens for.
-        // Edge picks up this event from the Event Hub, posts it to the AJO Edge endpoint
-        // with ECID correlation intact, and the XDM (messageExecutionID / campaignID etc.)
-        // flows through unchanged so server-side AJO reporting can correlate.
         val event = Event.Builder(
             EVENT_NAME_LIVE_UPDATE_TRACKING,
             EventType.EDGE,
@@ -267,45 +618,64 @@ object LiveUpdates {
     }
 
     /**
-     * Constructs the outbound XDM map for a Live Update lifecycle tracking event. Mirrors the
-     * shape Messaging's `MessagingExtension.getXdmData` + `addXDMData` produce for standard
-     * push tracking, and adds the iOS-parity `pushChannelContext.liveActivity` block carrying
-     * the Live Update id, topic name, and lifecycle phase. See class-level KDoc for the full
-     * field list and the Push Tracking Experience Event Schema reference.
+     * Constructs the outbound XDM map for a Live Update tracking event. Used for both the
+     * lifecycle receive event (`liveUpdateTracking.received`) and interaction events
+     * (`liveUpdateTracking.applicationOpened` for tap,
+     * `liveUpdateTracking.customAction` for action-button clicks and dismiss).
+     *
+     * The receive lifecycle phase (`start` / `update` / `end`) rides through
+     * `pushChannelContext.liveActivity.event` only for the receive dispatch; interaction
+     * events (tap / action click / dismiss) omit the field so AJO reporting does not
+     * double-count them against the concurrent lifecycle phase. When [customActionId]
+     * is non-null, it is added under `pushNotificationTracking.customAction.actionID`.
      */
-    private fun buildLiveActivityTrackingXdm(payload: LiveUpdatePayload): Map<String, Any?> {
+    private fun buildLiveActivityTrackingXdm(
+        xdmEventType: String,
+        notificationId: String?,
+        topicName: String?,
+        liveActivityEvent: String?,
+        incomingXdm: JSONObject?,
+        customActionId: String?
+    ): Map<String, Any?> {
         val xdmMap = mutableMapOf<String, Any?>()
 
-        // 1. Top-level eventType. Same canonical value Messaging uses for standard push
-        //    tracking; the Live Update lifecycle phase is carried in
-        //    pushChannelContext.liveActivity.event below.
-        xdmMap[XDM_KEY_EVENT_TYPE] = XDM_VALUE_PUSH_TRACKING_APPLICATION_OPENED
+        // 1. Top-level eventType.
+        xdmMap[XDM_KEY_EVENT_TYPE] = xdmEventType
 
         // 2. pushNotificationTracking marker - identifies FCM as the push provider for this
-        //    event, identical to standard push tracking events.
-        xdmMap[XDM_KEY_PUSH_NOTIFICATION_TRACKING] = mapOf<String, Any?>(
-            XDM_KEY_PUSH_PROVIDER to XDM_VALUE_PLATFORM_FCM,
-            XDM_KEY_PUSH_PROVIDER_MESSAGE_ID to payload.notificationId
+        //    event. pushProviderMessageID is only meaningful when a notification is
+        //    associated with the event (all lifecycle/interaction events); topic-subscription
+        //    events omit it.
+        val pushNotificationTracking = mutableMapOf<String, Any?>(
+            XDM_KEY_PUSH_PROVIDER to XDM_VALUE_PLATFORM_FCM
         )
+        if (!notificationId.isNullOrEmpty()) {
+            pushNotificationTracking[XDM_KEY_PUSH_PROVIDER_MESSAGE_ID] = notificationId
+        }
+        if (!customActionId.isNullOrEmpty()) {
+            pushNotificationTracking[XDM_KEY_CUSTOM_ACTION] = mapOf<String, Any?>(
+                XDM_KEY_ACTION_ID to customActionId
+            )
+        }
+        xdmMap[XDM_KEY_PUSH_NOTIFICATION_TRACKING] = pushNotificationTracking
 
         // 3. Merge the incoming _xdm passthrough from the server. AJO nests its mixins under
         //    "mixins" (or "cjm" as an alias) for schema composition; flatten to root before
         //    Edge sees it. Mirrors MessagingExtension.addXDMData.
-        val incomingXdm = payload.xdm?.let { jsonObjectToMap(it) }
-        if (incomingXdm != null) {
+        val incomingXdmMap = incomingXdm?.let { jsonObjectToMap(it) }
+        if (incomingXdmMap != null) {
             @Suppress("UNCHECKED_CAST")
-            val mixinsLayer = (incomingXdm[XDM_KEY_MIXINS] as? Map<String, Any?>)
-                ?: (incomingXdm[XDM_KEY_CJM] as? Map<String, Any?>)
+            val mixinsLayer = (incomingXdmMap[XDM_KEY_MIXINS] as? Map<String, Any?>)
+                ?: (incomingXdmMap[XDM_KEY_CJM] as? Map<String, Any?>)
             if (mixinsLayer != null) {
                 xdmMap.putAll(mixinsLayer)
             } else {
-                // Server did not use a wrapper; treat root fields as already-flattened.
-                xdmMap.putAll(incomingXdm.filterKeys { it != XDM_KEY_MIXINS && it != XDM_KEY_CJM })
+                xdmMap.putAll(incomingXdmMap.filterKeys { it != XDM_KEY_MIXINS && it != XDM_KEY_CJM })
             }
         }
 
-        // 4. Find or build _experience.customerJourneyManagement, then add the standard
-        //    Messaging push profile + the iOS-parity pushChannelContext.liveActivity block.
+        // 4. Find or build _experience.customerJourneyManagement and inject the standard
+        //    Messaging push profile plus the pushChannelContext.liveActivity block.
         @Suppress("UNCHECKED_CAST")
         val experience = (xdmMap[XDM_KEY_EXPERIENCE] as? Map<String, Any?>)?.toMutableMap()
             ?: mutableMapOf()
@@ -313,7 +683,6 @@ object LiveUpdates {
         val cjm = (experience[XDM_KEY_CUSTOMER_JOURNEY_MANAGEMENT] as? Map<String, Any?>)?.toMutableMap()
             ?: mutableMapOf()
 
-        // messageProfile.channel = push (same as Messaging's MESSAGE_PROFILE_JSON constant)
         @Suppress("UNCHECKED_CAST")
         val messageProfile = (cjm[XDM_KEY_MESSAGE_PROFILE] as? Map<String, Any?>)?.toMutableMap()
             ?: mutableMapOf()
@@ -324,15 +693,23 @@ object LiveUpdates {
         }
         cjm[XDM_KEY_MESSAGE_PROFILE] = messageProfile
 
-        // pushChannelContext.liveActivity - the new bit for Live Updates. Mirrors the iOS
-        // Live Activities tracking shape that AJO already understands in production.
+        val liveActivity = mutableMapOf<String, Any?>(
+            XDM_KEY_LIVE_ACTIVITY_CHANNEL_ID to (topicName ?: "")
+        )
+        // liveActivityID only rides when a notification is associated with this event.
+        // Topic subscribe / unsubscribe fired outside a Live Update chip has no id.
+        if (!notificationId.isNullOrEmpty()) {
+            liveActivity[XDM_KEY_LIVE_ACTIVITY_ID] = notificationId
+        }
+        // liveActivity.event is populated only for receive lifecycle events (start/update/end)
+        // and topic-change events (topic_subscribed/topic_unsubscribed); interaction events
+        // omit it so AJO reporting does not double-count them against the concurrent lifecycle phase.
+        if (!liveActivityEvent.isNullOrEmpty()) {
+            liveActivity[XDM_KEY_LIVE_ACTIVITY_EVENT] = liveActivityEvent
+        }
         cjm[XDM_KEY_PUSH_CHANNEL_CONTEXT] = mapOf<String, Any?>(
             XDM_KEY_PLATFORM to XDM_VALUE_PLATFORM_FCM,
-            XDM_KEY_LIVE_ACTIVITY to mapOf<String, Any?>(
-                XDM_KEY_LIVE_ACTIVITY_ID to payload.notificationId,
-                XDM_KEY_LIVE_ACTIVITY_CHANNEL_ID to (payload.topicName ?: ""),
-                XDM_KEY_LIVE_ACTIVITY_EVENT to payload.eventType
-            )
+            XDM_KEY_LIVE_ACTIVITY to liveActivity
         )
 
         experience[XDM_KEY_CUSTOMER_JOURNEY_MANAGEMENT] = cjm
@@ -390,8 +767,42 @@ object LiveUpdates {
             }
         } catch (e: Exception) {
             Log.warning(
-                SELF_TAG, SELF_TAG,
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
                 "ILiveUpdateListener threw an exception: ${e.localizedMessage}"
+            )
+        }
+    }
+
+    /**
+     * Re-hydrates the full [LiveUpdatePayload] from the extras on a dismiss [intent] (set via
+     * [LiveUpdateHandlerImpl] at post time) and invokes [ILiveUpdateListener.onDismissed].
+     * No-op if no listener is registered or the payload extra is missing / unparseable.
+     * Called from [LiveUpdateInteractionReceiver] after dismiss tracking is dispatched.
+     */
+    internal fun notifyDismissed(intent: Intent) {
+        val listener = LiveUpdateListenerStore.getListener() ?: return
+        val envelopeJson = intent.getStringExtra(EXTRA_PAYLOAD)
+        if (envelopeJson.isNullOrEmpty()) {
+            Log.debug(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "Cannot invoke onDismissed: dismiss intent carries no serialized payload."
+            )
+            return
+        }
+        val payload = LiveUpdatePayload.fromEnvelopeJson(envelopeJson, intent.getStringExtra(EXTRA_XDM))
+        if (payload == null) {
+            Log.debug(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "Cannot invoke onDismissed: serialized payload failed to re-hydrate."
+            )
+            return
+        }
+        try {
+            listener.onDismissed(payload)
+        } catch (e: Exception) {
+            Log.warning(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "ILiveUpdateListener.onDismissed threw an exception: ${e.localizedMessage}"
             )
         }
     }

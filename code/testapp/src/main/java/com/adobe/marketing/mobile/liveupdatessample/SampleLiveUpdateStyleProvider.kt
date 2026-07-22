@@ -11,8 +11,10 @@
 
 package com.adobe.marketing.mobile.liveupdatessample
 
+import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.graphics.drawable.IconCompat
 import com.adobe.marketing.mobile.messaging.liveupdate.ILiveUpdateStyleProvider
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload
 
@@ -21,7 +23,8 @@ import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload
  * `payload.contentState` and returns a matching [NotificationCompat.Style].
  *
  * Supported template types:
- *  - `progress` - [NotificationCompat.ProgressStyle] for journey / delivery flows.
+ *  - `progress` - [NotificationCompat.ProgressStyle] configured with four phase-colored
+ *                 segments and a moving airplane tracker icon.
  *  - `metric`   - platform [android.app.Notification.MetricStyle] bridged via
  *                 [MetricStyleCompat] on API 37+; [NotificationCompat.ProgressStyle]
  *                 fallback (with match minute as progress) on older devices.
@@ -29,8 +32,13 @@ import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload
  *
  * Any other template value causes the provider to return `null`, which the SDK
  * treats as "drop this push".
+ *
+ * @param context host-application context, used to build the [IconCompat] resources
+ *                referenced by the progress tracker.
  */
-class SampleLiveUpdateStyleProvider : ILiveUpdateStyleProvider {
+class SampleLiveUpdateStyleProvider(
+    private val context: Context
+) : ILiveUpdateStyleProvider {
 
     override fun provideStyle(payload: LiveUpdatePayload): NotificationCompat.Style? {
         val state = payload.contentState
@@ -43,7 +51,22 @@ class SampleLiveUpdateStyleProvider : ILiveUpdateStyleProvider {
                 val progress = state?.optInt("custom_key_journey_progress", 0) ?: 0
                 NotificationCompat.ProgressStyle()
                     .setProgress(progress)
-                    .setStyledByProgress(true)
+                    .setProgressTrackerIcon(
+                        IconCompat.createWithResource(context, R.drawable.ic_flight_marker)
+                    )
+                    .setProgressSegments(
+                        listOf(
+                            NotificationCompat.ProgressStyle.Segment(10)
+                                .setColor(SEGMENT_COLOR_BOARDING),
+                            NotificationCompat.ProgressStyle.Segment(30)
+                                .setColor(SEGMENT_COLOR_TAKEOFF),
+                            NotificationCompat.ProgressStyle.Segment(20)
+                                .setColor(SEGMENT_COLOR_CRUISE),
+                            // Segments sum to 100 to match the 0-100 custom_key_journey_progress scale.
+                            NotificationCompat.ProgressStyle.Segment(40)
+                                .setColor(SEGMENT_COLOR_LANDING)
+                        )
+                    )
             }
             "metric" -> {
                 if (Build.VERSION.SDK_INT >= 37) {
@@ -90,5 +113,15 @@ class SampleLiveUpdateStyleProvider : ILiveUpdateStyleProvider {
                 cleaned.toIntOrNull() ?: 0
             }
         }
+    }
+
+    private companion object {
+        // Journey-phase colors for the progress bar segments. Ordered warm-to-cool as
+        // the journey progresses from ground (boarding, green) to sky (cruise, indigo)
+        // to arrival (landing, purple).
+        const val SEGMENT_COLOR_BOARDING = 0xFF4CAF50.toInt()   // green
+        const val SEGMENT_COLOR_TAKEOFF  = 0xFF03A9F4.toInt()   // light blue
+        const val SEGMENT_COLOR_CRUISE   = 0xFF3F51B5.toInt()   // indigo
+        const val SEGMENT_COLOR_LANDING  = 0xFF9C27B0.toInt()   // purple
     }
 }

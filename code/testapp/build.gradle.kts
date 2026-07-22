@@ -9,8 +9,6 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import com.adobe.marketing.mobile.gradle.BuildConstants
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -23,22 +21,22 @@ plugins {
 
 android {
     namespace = "com.adobe.marketing.mobile.liveupdatessample"
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.adobe.marketing.mobile.liveupdatessample"
-        compileSdk = BuildConstants.Versions.COMPILE_SDK_VERSION
-        minSdk = BuildConstants.Versions.MIN_SDK_VERSION
-        targetSdk = BuildConstants.Versions.TARGET_SDK_VERSION
-        versionCode = BuildConstants.Versions.VERSION_CODE
-        versionName = BuildConstants.Versions.VERSION_NAME
+        minSdk = 21
+        targetSdk = 36
+        versionCode = 1
+        versionName = "1"
     }
 
     kotlinOptions {
-        jvmTarget = BuildConstants.Versions.KOTLIN_JVM_TARGET
+        jvmTarget = "1.8"
     }
 
     buildTypes {
-        getByName(BuildConstants.BuildTypes.RELEASE) {
+        getByName("release") {
             isMinifyEnabled = false
         }
     }

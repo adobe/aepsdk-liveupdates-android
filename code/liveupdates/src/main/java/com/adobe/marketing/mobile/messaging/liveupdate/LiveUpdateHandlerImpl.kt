@@ -14,12 +14,15 @@ package com.adobe.marketing.mobile.messaging.liveupdate
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.adobe.marketing.mobile.ILiveUpdateHandler
 import com.adobe.marketing.mobile.MobileCore
+import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload.Companion.EVENT_TYPE_END
 import com.adobe.marketing.mobile.services.Log
 import com.google.firebase.messaging.RemoteMessage
 
@@ -35,7 +38,7 @@ import com.google.firebase.messaging.RemoteMessage
  * ```
  *
  * Drops the push (warning log, no notification posted) in these cases:
- *  - payload fails to parse (any required field missing: notification_id, channel_id, event_type, title)
+ *  - payload fails to parse (any required field missing: notification_id, notification_channel_id, event_type, title)
  *  - style provider returns `null`
  *
  * After a successful `notify(...)`, dispatches the Live Update event tracking
@@ -54,14 +57,32 @@ class LiveUpdateHandlerImpl(
     override fun handleLiveUpdatePush(context: Context, message: RemoteMessage) {
         val payload = LiveUpdatePayload.parse(message)
         if (payload == null) {
-            Log.warning(LOG_TAG, TAG, "Dropping Live Update: failed to parse payload.")
+            Log.warning(LiveUpdatesConstants.LOG_TAG, TAG, "Dropping Live Update: failed to parse payload.")
             return
         }
+        // Consult the app-registered interceptor before any rendering / tracking / listener
+        // dispatch. A `false` verdict drops the Live Update entirely.
+        if (!LiveUpdates.shouldDisplay(payload)) {
+            Log.debug(
+                LiveUpdatesConstants.LOG_TAG, TAG,
+                "Live Update id=${payload.notificationId} vetoed by ILiveUpdateInterceptor; dropping."
+            )
+            return
+        }
+        postLiveUpdate(context, payload)
+    }
 
+    /**
+     * Renders and posts the chip for [payload], then dispatches the receive lifecycle
+     * tracking event and invokes any registered [ILiveUpdateListener]. Shared between the
+     * FCM-received flow ([handleLiveUpdatePush]) and the app-triggered local flow
+     * ([LiveUpdates.triggerLocalLiveUpdate]).
+     */
+    internal fun postLiveUpdate(context: Context, payload: LiveUpdatePayload) {
         val style = styleProvider.provideStyle(payload)
         if (style == null) {
             Log.warning(
-                LOG_TAG,
+                LiveUpdatesConstants.LOG_TAG,
                 TAG,
                 "Dropping Live Update id=${payload.notificationId}: style provider returned null."
             )
@@ -76,28 +97,34 @@ class LiveUpdateHandlerImpl(
         ensureChannelExists(context, payload.channelId)
 
         val builder = NotificationCompat.Builder(context, payload.channelId)
-            .setSmallIcon(resolveSmallIcon(context))
+            .setSmallIcon(resolveSmallIcon(context, payload.smallIcon))
             .setContentTitle(payload.title)
             .setContentText(payload.body)
             .setStyle(style)
             .setOngoing(true)
             .setRequestPromotedOngoing(true)
             .setPriority(mapPriority(payload.priority))
+            .setContentIntent(buildTapPendingIntent(context, payload))
+            .setDeleteIntent(buildDismissPendingIntent(context, payload))
         payload.criticalText?.let { builder.setShortCriticalText(it) }
         payload.whenMillis?.let { builder.setWhen(it).setShowWhen(true) }
 
-        // Apply auto-dismiss whenever dismiss_after is present and positive. Not gated on
-        // any event_type marker — the server decides "is this the last push?" by including
-        // or omitting dismiss_after, not by sending a magic event string.
-        payload.dismissAfterSeconds?.takeIf { it > 0L }?.let {
-            builder.setTimeoutAfter(it * 1000L)
+        // Apply auto-dismiss only for the terminal `end` push, and only when dismiss_after is
+        // present and positive. The chip persists through start/update pushes and then times
+        // out the server-specified number of seconds after the end push is received.
+        if (payload.eventType == EVENT_TYPE_END) {
+            payload.dismissAfterSeconds?.takeIf { it > 0L }?.let {
+                builder.setTimeoutAfter(it * 1000L)
+            }
         }
+
+        addActionButtons(context, builder, payload)
 
         val notification = builder.build()
 
         checkPromotionEligibility(context, notification)?.let { reason ->
             Log.warning(
-                LOG_TAG,
+                LiveUpdatesConstants.LOG_TAG,
                 TAG,
                 "Live Update will post as a NORMAL ongoing notification (not promoted to chip). Reason: $reason"
             )
@@ -113,10 +140,118 @@ class LiveUpdateHandlerImpl(
     }
 
     /**
-     * Resolves the small icon resource id: prefer the app's `MobileCore`-configured icon,
-     * fall back to the app's launcher icon. A small icon is mandatory or `notify()` throws.
+     * Builds the content-intent PendingIntent for the chip body tap. Routes through the
+     * SDK's [LiveUpdateTrackerActivity] so tracking fires before the destination launches.
      */
-    private fun resolveSmallIcon(context: Context): Int {
+    private fun buildTapPendingIntent(
+        context: Context,
+        payload: LiveUpdatePayload
+    ): PendingIntent {
+        val tapIntent = Intent(context, LiveUpdateTrackerActivity::class.java).apply {
+            addTrackingExtras(payload)
+            payload.actionUri?.let { putExtra(LiveUpdates.EXTRA_ACTION_URI, it) }
+        }
+        return PendingIntent.getActivity(
+            context,
+            payload.notificationId.hashCode(),
+            tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    /**
+     * Builds the delete-intent PendingIntent for chip dismissal. Broadcasts to
+     * [LiveUpdateInteractionReceiver] which fires `customActionId="Dismiss"` tracking.
+     */
+    private fun buildDismissPendingIntent(
+        context: Context,
+        payload: LiveUpdatePayload
+    ): PendingIntent {
+        val dismissIntent = Intent(context, LiveUpdateInteractionReceiver::class.java).apply {
+            action = LiveUpdateInteractionReceiver.ACTION_DISMISS
+            addTrackingExtras(payload)
+            // Serialize the full payload so onDismissed can re-hydrate it, even if the app
+            // process was killed between post and dismiss (only the intent extras survive).
+            putExtra(LiveUpdates.EXTRA_PAYLOAD, payload.toEnvelopeJson())
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            payload.notificationId.hashCode() + DISMISS_REQUEST_CODE_OFFSET,
+            dismissIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    /**
+     * Adds one [NotificationCompat.Action] per entry in `payload.actionButtons`. Each entry
+     * must be a JSON object with `label` (required) and optional `uri`. All action buttons
+     * route through [LiveUpdateTrackerActivity]; the button's `label` rides as the
+     * `customActionId` (Messaging's convention) so tracking can distinguish which button
+     * fired the interaction.
+     */
+    private fun addActionButtons(
+        context: Context,
+        builder: NotificationCompat.Builder,
+        payload: LiveUpdatePayload
+    ) {
+        val buttons = payload.actionButtons ?: return
+        for (i in 0 until buttons.length()) {
+            val button = buttons.optJSONObject(i) ?: continue
+            val label = button.optString(KEY_ACTION_BUTTON_LABEL).takeIf { it.isNotEmpty() }
+            if (label == null) {
+                Log.debug(
+                    LiveUpdatesConstants.LOG_TAG, TAG,
+                    "Skipping action button at index $i: missing 'label' field."
+                )
+                continue
+            }
+            val uri = button.optString(KEY_ACTION_BUTTON_URI).takeIf { it.isNotEmpty() }
+            val actionIntent = Intent(context, LiveUpdateTrackerActivity::class.java).apply {
+                addTrackingExtras(payload)
+                putExtra(LiveUpdates.EXTRA_ACTION_ID, label)
+                uri?.let { putExtra(LiveUpdates.EXTRA_ACTION_URI, it) }
+            }
+            val actionPi = PendingIntent.getActivity(
+                context,
+                (payload.notificationId + label).hashCode(),
+                actionIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            builder.addAction(NotificationCompat.Action(0, label, actionPi))
+        }
+    }
+
+    /**
+     * Adds Live Update tracking extras to [this] intent so the tracker Activity or dismiss
+     * receiver can reconstruct enough context for the outbound XDM without a second parse
+     * of the FCM message.
+     */
+    private fun Intent.addTrackingExtras(payload: LiveUpdatePayload) {
+        putExtra(LiveUpdates.EXTRA_NOTIFICATION_ID, payload.notificationId)
+        putExtra(LiveUpdates.EXTRA_EVENT_TYPE, payload.eventType)
+        payload.topicName?.let { putExtra(LiveUpdates.EXTRA_CHANNEL_ID, it) }
+        payload.xdm?.let { putExtra(LiveUpdates.EXTRA_XDM, it.toString()) }
+    }
+
+    /**
+     * Resolves the small icon resource id using a three-step fallback:
+     *  1. If the envelope carried a `small_icon` name and it resolves to a drawable in the
+     *     host app's resources, use it.
+     *  2. Otherwise, use the icon configured globally via
+     *     [MobileCore.setSmallIconResourceID].
+     *  3. Otherwise, use the app's launcher icon.
+     *
+     * A small icon is mandatory or `notify()` throws.
+     */
+    private fun resolveSmallIcon(context: Context, payloadIconName: String?): Int {
+        if (!payloadIconName.isNullOrEmpty()) {
+            val resolved = context.resources.getIdentifier(
+                payloadIconName,
+                "drawable",
+                context.packageName
+            )
+            if (resolved > 0) return resolved
+        }
         val configured = MobileCore.getSmallIconResourceID()
         if (configured > 0) return configured
         return context.applicationInfo.icon
@@ -189,10 +324,15 @@ class LiveUpdateHandlerImpl(
 
     private companion object {
         const val TAG = "LiveUpdateHandlerImpl"
-        const val LOG_TAG = "LiveUpdateHandlerImpl"
         const val DEFAULT_CHANNEL_NAME = "Live Updates"
         const val DEFAULT_CHANNEL_DESCRIPTION = "Status-bar chips for AJO Live Updates"
+
+        // action_buttons entry field names.
+        const val KEY_ACTION_BUTTON_LABEL = "label"
+        const val KEY_ACTION_BUTTON_URI = "uri"
+
+        // Keeps dismiss PendingIntent's request code distinct from tap's so
+        // PendingIntent.FLAG_UPDATE_CURRENT does not collapse them.
+        const val DISMISS_REQUEST_CODE_OFFSET = 1
     }
 }
-
-
