@@ -24,9 +24,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.any
+import org.mockito.MockedStatic
 import org.mockito.Mockito.mockStatic
 import org.mockito.Mockito.times
-import org.mockito.MockedStatic
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment

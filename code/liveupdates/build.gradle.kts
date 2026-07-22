@@ -60,7 +60,6 @@ dependencies {
     // testImplementation dependencies provided by aep-library:
     // JUNIT, MOCKITO_CORE, MOCKITO_INLINE, JSON, MOCKITO_KOTLIN
     testImplementation("com.google.firebase:firebase-messaging:23.4.1")
-    testImplementation(BuildConstants.Dependencies.MOCKK)
     // need to use robolectric 4.14 to get android 35 support in unit tests
     testImplementation("org.robolectric:robolectric:4.14")
     // specify byte buddy version to fix compatibility issue with jdk 21

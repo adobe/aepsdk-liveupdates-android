@@ -33,38 +33,42 @@ import org.mockito.Mockito;
  */
 public class JvmOverloadsCoverageTest {
 
-    @Test
-    public void create_withOnlyRequiredArgs_fromJavaOverload() {
-        LiveUpdatePayload payload =
-                LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "Title");
-        assertNotNull(payload);
-        assertEquals("id1", payload.getNotificationId());
-        assertEquals("Title", payload.getTitle());
-    }
+	@Test
+	public void create_withOnlyRequiredArgs_fromJavaOverload() {
+		LiveUpdatePayload payload = LiveUpdatePayload.create(
+			"id1",
+			"chan",
+			LiveUpdatePayload.EVENT_TYPE_START,
+			"Title"
+		);
+		assertNotNull(payload);
+		assertEquals("id1", payload.getNotificationId());
+		assertEquals("Title", payload.getTitle());
+	}
 
-    @Test
-    public void trackTopicSubscribed_javaOverload_withoutNotificationId() {
-        try (MockedStatic<MobileCore> mobileCore = mockStatic(MobileCore.class)) {
-            LiveUpdates.trackTopicSubscribed("topicA");
-            mobileCore.verify(() -> MobileCore.dispatchEvent(any()));
-        }
-    }
+	@Test
+	public void trackTopicSubscribed_javaOverload_withoutNotificationId() {
+		try (MockedStatic<MobileCore> mobileCore = mockStatic(MobileCore.class)) {
+			LiveUpdates.trackTopicSubscribed("topicA");
+			mobileCore.verify(() -> MobileCore.dispatchEvent(any()));
+		}
+	}
 
-    @Test
-    public void trackTopicUnsubscribed_javaOverload_withoutNotificationId() {
-        try (MockedStatic<MobileCore> mobileCore = mockStatic(MobileCore.class)) {
-            LiveUpdates.trackTopicUnsubscribed("topicB");
-            mobileCore.verify(() -> MobileCore.dispatchEvent(any()));
-        }
-    }
+	@Test
+	public void trackTopicUnsubscribed_javaOverload_withoutNotificationId() {
+		try (MockedStatic<MobileCore> mobileCore = mockStatic(MobileCore.class)) {
+			LiveUpdates.trackTopicUnsubscribed("topicB");
+			mobileCore.verify(() -> MobileCore.dispatchEvent(any()));
+		}
+	}
 
-    @Test
-    public void handleNotificationResponse_javaOverload_withoutCustomActionId() {
-        Intent intent = Mockito.mock(Intent.class);
-        Mockito.when(intent.getStringExtra(LiveUpdates.EXTRA_NOTIFICATION_ID)).thenReturn("id1");
-        try (MockedStatic<MobileCore> mobileCore = mockStatic(MobileCore.class)) {
-            LiveUpdates.handleNotificationResponse(intent, true);
-            mobileCore.verify(() -> MobileCore.dispatchEvent(any()));
-        }
-    }
+	@Test
+	public void handleNotificationResponse_javaOverload_withoutCustomActionId() {
+		Intent intent = Mockito.mock(Intent.class);
+		Mockito.when(intent.getStringExtra(LiveUpdates.EXTRA_NOTIFICATION_ID)).thenReturn("id1");
+		try (MockedStatic<MobileCore> mobileCore = mockStatic(MobileCore.class)) {
+			LiveUpdates.handleNotificationResponse(intent, true);
+			mobileCore.verify(() -> MobileCore.dispatchEvent(any()));
+		}
+	}
 }

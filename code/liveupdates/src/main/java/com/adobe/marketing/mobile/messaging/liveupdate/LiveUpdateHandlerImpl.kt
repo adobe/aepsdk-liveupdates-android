@@ -25,7 +25,6 @@ import com.adobe.marketing.mobile.MobileCore
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload.Companion.EVENT_TYPE_END
 import com.adobe.marketing.mobile.services.Log
 import com.google.firebase.messaging.RemoteMessage
-import org.json.JSONObject
 
 /**
  * Canonical [ILiveUpdateHandler] implementation. Parses the [RemoteMessage] into a
@@ -337,5 +336,3 @@ class LiveUpdateHandlerImpl(
         const val DISMISS_REQUEST_CODE_OFFSET = 1
     }
 }
-
-

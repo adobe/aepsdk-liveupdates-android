@@ -12,6 +12,8 @@
 package com.adobe.marketing.mobile.messaging.liveupdate
 
 import androidx.core.app.NotificationCompat
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -40,7 +42,7 @@ class InterfaceDefaultsTest {
             override fun shouldDisplayLiveUpdate(payload: LiveUpdatePayload) = true
         }
         val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T")
-        assert(interceptor.shouldDisplayLiveUpdate(payload))
+        assertTrue(interceptor.shouldDisplayLiveUpdate(payload))
     }
 
     @Test
@@ -48,6 +50,6 @@ class InterfaceDefaultsTest {
         val style = NotificationCompat.BigTextStyle()
         val provider = ILiveUpdateStyleProvider { style }
         val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T")
-        assert(provider.provideStyle(payload) === style)
+        assertSame(style, provider.provideStyle(payload))
     }
 }
