@@ -70,8 +70,10 @@ import kotlin.coroutines.resume
  * shared network service) to fetch the server-side subscription list.
  *
  * The current-subscription list is fetched only when the user taps "Refresh list" and
- * pastes an OAuth2 access token; nothing is persisted locally. The token is not stored
- * across dialog dismissals - the user must paste it again on every refresh.
+ * pastes an OAuth2 access token; nothing is persisted to disk. The last-used token is kept
+ * in memory for the lifetime of this screen and pre-filled into the refresh dialog so it can
+ * be reused or replaced; it is never written to storage and is discarded when the screen is
+ * left.
  */
 @Composable
 fun TopicsScreen(fcmToken: String?, onBack: () -> Unit) {

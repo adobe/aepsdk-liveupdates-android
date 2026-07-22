@@ -23,7 +23,6 @@ import com.adobe.marketing.mobile.MobileCore
 import com.adobe.marketing.mobile.messaging.MessagingService
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdates
-import com.adobe.marketing.mobile.services.Log
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 

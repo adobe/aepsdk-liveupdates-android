@@ -68,6 +68,14 @@ class LiveUpdatePayload private constructor(
 ) {
 
     /**
+     * Concise, log-friendly representation. The default (non-data-class) `toString()` would
+     * only print the object hash, so this surfaces the key identifying fields instead.
+     */
+    override fun toString(): String =
+        "LiveUpdatePayload(notificationId=$notificationId, eventType=$eventType, " +
+            "channelId=$channelId, title=$title, topicName=$topicName)"
+
+    /**
      * Serializes this payload back into the SDK-canonical envelope JSON (the same shape
      * [parse] reads from `adb_liveupdate_data`). Used to carry the full payload on a chip's
      * interaction PendingIntents (e.g. the dismiss delete-intent) so the SDK can re-hydrate

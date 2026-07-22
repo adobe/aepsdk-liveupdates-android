@@ -48,8 +48,10 @@ class LiveUpdatesApplication : Application() {
             Assurance.EXTENSION
         )
         MobileCore.registerExtensions(extensions) {
-            // TODO: replace with the environment file id from your Adobe Data Collection
-            // (Launch) property before running the sample app against real infrastructure.
+            // TODO: replace the placeholder below with the environment file id from your Adobe
+            // Data Collection (Launch) property before running the sample against real
+            // infrastructure. Without a valid id, events will not reach Adobe services.
+            MobileCore.configureWithAppID("<YOUR_ENVIRONMENT_FILE_ID>")
             MobileCore.lifecycleStart(null)
 
             // Primary identity demonstration. AJO uses this to correlate server-side

@@ -619,8 +619,8 @@ object LiveUpdates {
 
     /**
      * Constructs the outbound XDM map for a Live Update tracking event. Used for both the
-     * lifecycle receive event (`liveUpdateTracking.applicationOpened`) and interaction
-     * events (`liveUpdateTracking.applicationOpened` for tap,
+     * lifecycle receive event (`liveUpdateTracking.received`) and interaction events
+     * (`liveUpdateTracking.applicationOpened` for tap,
      * `liveUpdateTracking.customAction` for action-button clicks and dismiss).
      *
      * The receive lifecycle phase (`start` / `update` / `end`) rides through
