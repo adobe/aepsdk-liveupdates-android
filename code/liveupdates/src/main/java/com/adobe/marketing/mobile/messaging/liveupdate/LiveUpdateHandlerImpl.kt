@@ -109,9 +109,9 @@ class LiveUpdateHandlerImpl(
         payload.criticalText?.let { builder.setShortCriticalText(it) }
         payload.whenMillis?.let { builder.setWhen(it).setShowWhen(true) }
 
-        // Apply auto-dismiss whenever dismiss_after is present and positive. Not gated on
-        // any event_type marker — the server decides "is this the last push?" by including
-        // or omitting dismiss_after, not by sending a magic event string.
+        // Apply auto-dismiss only for the terminal `end` push, and only when dismiss_after is
+        // present and positive. The chip persists through start/update pushes and then times
+        // out the server-specified number of seconds after the end push is received.
         if (payload.eventType == EVENT_TYPE_END) {
             payload.dismissAfterSeconds?.takeIf { it > 0L }?.let {
                 builder.setTimeoutAfter(it * 1000L)

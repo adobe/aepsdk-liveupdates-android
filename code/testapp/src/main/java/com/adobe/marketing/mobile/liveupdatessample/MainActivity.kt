@@ -198,8 +198,10 @@ private fun LiveUpdateInfoScreen(fcmToken: String?, onOpenTopics: () -> Unit) {
             Text("Start Assurance session (Quick Connect)")
         }
         Spacer(modifier = Modifier.height(16.dp))
-        // TEMP DEBUG: exercises the exact render path (postLiveUpdate -> styleProvider ->
-        // notify) with no FCM round-trip, so we can trace chip rendering on the emulator.
+        // Local test trigger (manual QA aid, intentionally kept in the sample app): raises a
+        // Live Update through the SDK's own render path (LiveUpdates.triggerLocalLiveUpdate ->
+        // postLiveUpdate -> styleProvider -> notify) with no FCM round-trip, so chip rendering
+        // can be verified directly on a device/emulator without sending a push.
         Button(onClick = {
             val payload = LiveUpdatePayload.create(
                 notificationId = "local_test_1",

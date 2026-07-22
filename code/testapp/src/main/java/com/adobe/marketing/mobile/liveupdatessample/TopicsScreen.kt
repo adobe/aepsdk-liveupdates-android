@@ -353,6 +353,11 @@ private suspend fun fetchSubscribedTopics(
     fcmToken: String,
     oauth2AccessToken: String
 ): Result<List<String>> = suspendCancellableCoroutine { cont ->
+    // Guard every resume: if the coroutine was cancelled (e.g. the screen left composition)
+    // before the network callback fires, resuming an inactive/already-resumed continuation throws.
+    fun resumeIfActive(result: Result<List<String>>) {
+        if (cont.isActive) cont.resume(result)
+    }
     val request = NetworkRequest(
         "https://iid.googleapis.com/iid/info/$fcmToken?details=true",
         HttpMethod.GET,
@@ -367,7 +372,7 @@ private suspend fun fetchSubscribedTopics(
     ServiceProvider.getInstance().networkService.connectAsync(request) { connection ->
         try {
             if (connection == null) {
-                cont.resume(Result.failure(IOException("Network service returned no connection")))
+                resumeIfActive(Result.failure(IOException("Network service returned no connection")))
                 return@connectAsync
             }
             val code = connection.responseCode
@@ -376,7 +381,7 @@ private suspend fun fetchSubscribedTopics(
                     ?.bufferedReader()
                     ?.use { it.readText() }
                     .orEmpty()
-                cont.resume(
+                resumeIfActive(
                     Result.failure(
                         IOException("HTTP $code${if (errBody.isNotEmpty()) ": ${errBody.take(200)}" else ""}")
                     )
@@ -388,9 +393,9 @@ private suspend fun fetchSubscribedTopics(
                 .use { it.readText() }
             val topicsObj = JSONObject(bodyText).optJSONObject("rel")?.optJSONObject("topics")
             val topicNames = topicsObj?.keys()?.asSequence()?.toList()?.sorted() ?: emptyList()
-            cont.resume(Result.success(topicNames))
+            resumeIfActive(Result.success(topicNames))
         } catch (e: Exception) {
-            cont.resume(Result.failure(e))
+            resumeIfActive(Result.failure(e))
         } finally {
             try { connection?.close() } catch (_: Exception) { /* ignore */ }
         }

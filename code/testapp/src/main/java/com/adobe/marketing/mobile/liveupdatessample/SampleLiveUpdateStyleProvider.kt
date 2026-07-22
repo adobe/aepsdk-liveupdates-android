@@ -62,7 +62,8 @@ class SampleLiveUpdateStyleProvider(
                                 .setColor(SEGMENT_COLOR_TAKEOFF),
                             NotificationCompat.ProgressStyle.Segment(20)
                                 .setColor(SEGMENT_COLOR_CRUISE),
-                            NotificationCompat.ProgressStyle.Segment(50)
+                            // Segments sum to 100 to match the 0-100 custom_key_journey_progress scale.
+                            NotificationCompat.ProgressStyle.Segment(40)
                                 .setColor(SEGMENT_COLOR_LANDING)
                         )
                     )

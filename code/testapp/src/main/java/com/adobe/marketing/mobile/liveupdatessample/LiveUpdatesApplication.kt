@@ -118,7 +118,7 @@ class LiveUpdatesApplication : Application() {
                 Log.d(TAG, "Live Update END: id=${payload.notificationId} (chip will dismiss soon)")
                 // Mirror of onStart: unsubscribe from the topic when the Live Update ends
                 // and dispatch the corresponding tracking event on success.
-                unSubscribeFromTopic(payload)
+                unsubscribeFromTopic(payload)
             }
 
             override fun onDismissed(payload: LiveUpdatePayload) {
@@ -132,12 +132,12 @@ class LiveUpdatesApplication : Application() {
                 if (SampleLiveUpdateInterceptor.DISCARD_DISMISSED_UPDATES) {
                     dismissedStore.markDismissed(payload.notificationId)
                 }
-                unSubscribeFromTopic(payload)
+                unsubscribeFromTopic(payload)
             }
         })
     }
 
-    private fun unSubscribeFromTopic(payload: LiveUpdatePayload) {
+    private fun unsubscribeFromTopic(payload: LiveUpdatePayload) {
         val topic = payload.topicName ?: return
         FirebaseMessaging.getInstance().unsubscribeFromTopic(topic)
             .addOnCompleteListener { task ->
