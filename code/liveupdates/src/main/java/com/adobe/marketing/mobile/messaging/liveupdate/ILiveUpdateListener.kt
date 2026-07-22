@@ -12,15 +12,18 @@
 package com.adobe.marketing.mobile.messaging.liveupdate
 
 /**
- * App-side hook fired when the SDK observes a Live Update push being received.
+ * App-side hook fired when the SDK observes Live Update activity - a push being received,
+ * or the user dismissing the chip.
  *
  * Register via [LiveUpdates.setLiveUpdateListener]. Implement only the methods you care
- * about; all four have default empty bodies.
+ * about; all have default empty bodies.
  *
- * **Invocation order**: [onLiveUpdateReceived] always fires first as a generic hook, then
- * exactly one of [onStart] / [onUpdate] / [onEnd] fires based on the envelope's `event_type`.
- * If `event_type` is absent or not one of the three canonical values, only [onLiveUpdateReceived]
- * fires (no specific Live Update event method is called).
+ * **Invocation order (receive)**: [onLiveUpdateReceived] always fires first as a generic
+ * hook, then exactly one of [onStart] / [onUpdate] / [onEnd] fires based on the envelope's
+ * `event_type`. If `event_type` is absent or not one of the three canonical values, only
+ * [onLiveUpdateReceived] fires (no specific Live Update event method is called).
+ *
+ * [onDismissed] fires on a separate, later interaction (a chip swipe) - see its own note.
  *
  * **Threading**: callbacks fire on whatever thread the SDK is processing the push on
  * - typically the FCM background thread for Patterns 1 and 2 (auto / mixed), and whatever
@@ -43,4 +46,21 @@ interface ILiveUpdateListener {
 
     /** Fired when `event_type == "end"`. */
     fun onEnd(payload: LiveUpdatePayload) {}
+
+    /**
+     * Fired when the user dismisses (swipes away) a Live Update chip.
+     *
+     * Unlike the receive callbacks above, this fires on a later, separate interaction - the
+     * app process may have been killed since the chip was posted and cold-started just to
+     * deliver this dismiss. The [payload] is re-hydrated from the data serialized onto the
+     * chip's dismiss intent at post time, so it reflects the payload of the **most recently
+     * posted** version of the chip, not necessarily live app state. For that reason, treat
+     * [LiveUpdatePayload.notificationId] as the reliable key and look up any current state
+     * from your own store.
+     *
+     * Because this can run in a freshly-started process, the listener is only invoked if one
+     * is registered by the time the dismiss is handled - register it in `Application.onCreate`
+     * (as the sample does) so it survives process death.
+     */
+    fun onDismissed(payload: LiveUpdatePayload) {}
 }

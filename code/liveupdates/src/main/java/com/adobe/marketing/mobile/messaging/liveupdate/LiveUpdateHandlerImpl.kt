@@ -22,9 +22,9 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.adobe.marketing.mobile.ILiveUpdateHandler
 import com.adobe.marketing.mobile.MobileCore
+import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload.Companion.EVENT_TYPE_END
 import com.adobe.marketing.mobile.services.Log
 import com.google.firebase.messaging.RemoteMessage
-import org.json.JSONObject
 
 /**
  * Canonical [ILiveUpdateHandler] implementation. Parses the [RemoteMessage] into a
@@ -38,7 +38,7 @@ import org.json.JSONObject
  * ```
  *
  * Drops the push (warning log, no notification posted) in these cases:
- *  - payload fails to parse (any required field missing: notification_id, channel_id, event_type, title)
+ *  - payload fails to parse (any required field missing: notification_id, notification_channel_id, event_type, title)
  *  - style provider returns `null`
  *
  * After a successful `notify(...)`, dispatches the Live Update event tracking
@@ -57,14 +57,32 @@ class LiveUpdateHandlerImpl(
     override fun handleLiveUpdatePush(context: Context, message: RemoteMessage) {
         val payload = LiveUpdatePayload.parse(message)
         if (payload == null) {
-            Log.warning(LOG_TAG, TAG, "Dropping Live Update: failed to parse payload.")
+            Log.warning(LiveUpdatesConstants.LOG_TAG, TAG, "Dropping Live Update: failed to parse payload.")
             return
         }
+        // Consult the app-registered interceptor before any rendering / tracking / listener
+        // dispatch. A `false` verdict drops the Live Update entirely.
+        if (!LiveUpdates.shouldDisplay(payload)) {
+            Log.debug(
+                LiveUpdatesConstants.LOG_TAG, TAG,
+                "Live Update id=${payload.notificationId} vetoed by ILiveUpdateInterceptor; dropping."
+            )
+            return
+        }
+        postLiveUpdate(context, payload)
+    }
 
+    /**
+     * Renders and posts the chip for [payload], then dispatches the receive lifecycle
+     * tracking event and invokes any registered [ILiveUpdateListener]. Shared between the
+     * FCM-received flow ([handleLiveUpdatePush]) and the app-triggered local flow
+     * ([LiveUpdates.triggerLocalLiveUpdate]).
+     */
+    internal fun postLiveUpdate(context: Context, payload: LiveUpdatePayload) {
         val style = styleProvider.provideStyle(payload)
         if (style == null) {
             Log.warning(
-                LOG_TAG,
+                LiveUpdatesConstants.LOG_TAG,
                 TAG,
                 "Dropping Live Update id=${payload.notificationId}: style provider returned null."
             )
@@ -91,11 +109,13 @@ class LiveUpdateHandlerImpl(
         payload.criticalText?.let { builder.setShortCriticalText(it) }
         payload.whenMillis?.let { builder.setWhen(it).setShowWhen(true) }
 
-        // Apply auto-dismiss whenever dismiss_after is present and positive. Not gated on
-        // any event_type marker — the server decides "is this the last push?" by including
-        // or omitting dismiss_after, not by sending a magic event string.
-        payload.dismissAfterSeconds?.takeIf { it > 0L }?.let {
-            builder.setTimeoutAfter(it * 1000L)
+        // Apply auto-dismiss only for the terminal `end` push, and only when dismiss_after is
+        // present and positive. The chip persists through start/update pushes and then times
+        // out the server-specified number of seconds after the end push is received.
+        if (payload.eventType == EVENT_TYPE_END) {
+            payload.dismissAfterSeconds?.takeIf { it > 0L }?.let {
+                builder.setTimeoutAfter(it * 1000L)
+            }
         }
 
         addActionButtons(context, builder, payload)
@@ -104,7 +124,7 @@ class LiveUpdateHandlerImpl(
 
         checkPromotionEligibility(context, notification)?.let { reason ->
             Log.warning(
-                LOG_TAG,
+                LiveUpdatesConstants.LOG_TAG,
                 TAG,
                 "Live Update will post as a NORMAL ongoing notification (not promoted to chip). Reason: $reason"
             )
@@ -150,6 +170,9 @@ class LiveUpdateHandlerImpl(
         val dismissIntent = Intent(context, LiveUpdateInteractionReceiver::class.java).apply {
             action = LiveUpdateInteractionReceiver.ACTION_DISMISS
             addTrackingExtras(payload)
+            // Serialize the full payload so onDismissed can re-hydrate it, even if the app
+            // process was killed between post and dismiss (only the intent extras survive).
+            putExtra(LiveUpdates.EXTRA_PAYLOAD, payload.toEnvelopeJson())
         }
         return PendingIntent.getBroadcast(
             context,
@@ -177,7 +200,7 @@ class LiveUpdateHandlerImpl(
             val label = button.optString(KEY_ACTION_BUTTON_LABEL).takeIf { it.isNotEmpty() }
             if (label == null) {
                 Log.debug(
-                    LOG_TAG, TAG,
+                    LiveUpdatesConstants.LOG_TAG, TAG,
                     "Skipping action button at index $i: missing 'label' field."
                 )
                 continue
@@ -301,7 +324,6 @@ class LiveUpdateHandlerImpl(
 
     private companion object {
         const val TAG = "LiveUpdateHandlerImpl"
-        const val LOG_TAG = "LiveUpdateHandlerImpl"
         const val DEFAULT_CHANNEL_NAME = "Live Updates"
         const val DEFAULT_CHANNEL_DESCRIPTION = "Status-bar chips for AJO Live Updates"
 
@@ -314,5 +336,3 @@ class LiveUpdateHandlerImpl(
         const val DISMISS_REQUEST_CODE_OFFSET = 1
     }
 }
-
-

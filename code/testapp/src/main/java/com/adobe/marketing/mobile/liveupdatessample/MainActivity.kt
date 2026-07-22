@@ -38,12 +38,16 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.google.firebase.messaging.FirebaseMessaging
+import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload
+import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdates
+import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
 
@@ -68,9 +72,20 @@ class MainActivity : ComponentActivity() {
         startAssuranceSessionIfAny(intent)
 
         setContent {
+            var showTopics by remember { mutableStateOf(false) }
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    LiveUpdateInfoScreen(fcmToken = fcmToken)
+                    if (showTopics) {
+                        TopicsScreen(
+                            fcmToken = fcmToken,
+                            onBack = { showTopics = false }
+                        )
+                    } else {
+                        LiveUpdateInfoScreen(
+                            fcmToken = fcmToken,
+                            onOpenTopics = { showTopics = true }
+                        )
+                    }
                 }
             }
         }
@@ -137,7 +152,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun LiveUpdateInfoScreen(fcmToken: String?) {
+private fun LiveUpdateInfoScreen(fcmToken: String?, onOpenTopics: () -> Unit) {
     val context = LocalContext.current
 
     Column(
@@ -166,20 +181,44 @@ private fun LiveUpdateInfoScreen(fcmToken: String?) {
             Button(onClick = { copyToClipboard(context, fcmToken, "FCM token") }) {
                 Text("Copy FCM token")
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            Button(
-                onClick = {
-                    copyToClipboard(context, "./fcm.sh $fcmToken", "fcm.sh command")
-                }
-            ) {
-                Text("Copy ./fcm.sh <token> command")
-            }
         }
         Spacer(modifier = Modifier.height(24.dp))
         Text(
-            text = "Run the copied command from the repo root to send a Live Update push.",
+            text = "Use this token as the target when sending FCM Live Update pushes to the device.",
             style = MaterialTheme.typography.bodySmall
         )
+        Spacer(modifier = Modifier.height(24.dp))
+        Button(onClick = onOpenTopics) {
+            Text("Manage FCM topics")
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        // Quick Connect: pairs with Assurance without a QR code / deeplink session id.
+        // No-ops on non-debuggable builds or if a session is already active.
+        Button(onClick = { Assurance.startSession() }) {
+            Text("Start Assurance session (Quick Connect)")
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        // Local test trigger (manual QA aid, intentionally kept in the sample app): raises a
+        // Live Update through the SDK's own render path (LiveUpdates.triggerLocalLiveUpdate ->
+        // postLiveUpdate -> styleProvider -> notify) with no FCM round-trip, so chip rendering
+        // can be verified directly on a device/emulator without sending a push.
+        Button(onClick = {
+            val payload = LiveUpdatePayload.create(
+                notificationId = "local_test_1",
+                channelId = "live_updates_channel",
+                eventType = LiveUpdatePayload.EVENT_TYPE_LOCAL_START,
+                title = "Local test chip",
+                body = "Rendered via triggerLocalLiveUpdate",
+                criticalText = "LIVE",
+                contentState = JSONObject()
+                    .put("custom_key_template_type", "progress")
+                    .put("custom_key_journey_progress", 10)
+            )
+            val ok = LiveUpdates.triggerLocalLiveUpdate(context, payload)
+            Toast.makeText(context, "triggerLocalLiveUpdate=$ok", Toast.LENGTH_LONG).show()
+        }) {
+            Text("TEST: local chip")
+        }
     }
 }
 

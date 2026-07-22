@@ -29,7 +29,7 @@ import org.json.JSONObject
  *
  * Schema v1.1 required fields (parse returns null when any is missing or empty):
  *  - `notification_id`
- *  - `channel_id`
+ *  - `notification_channel_id`
  *  - `event_type`
  *  - `title`
  */
@@ -66,12 +66,40 @@ class LiveUpdatePayload private constructor(
     // or unparseable.
     val xdm: JSONObject?
 ) {
+
+    /**
+     * Serializes this payload back into the SDK-canonical envelope JSON (the same shape
+     * [parse] reads from `adb_liveupdate_data`). Used to carry the full payload on a chip's
+     * interaction PendingIntents (e.g. the dismiss delete-intent) so the SDK can re-hydrate
+     * it via [fromEnvelopeJson] when the interaction fires - possibly after process death,
+     * where only the PendingIntent extras survive. The `_xdm` block is carried separately.
+     */
+    internal fun toEnvelopeJson(): String {
+        val obj = JSONObject()
+        obj.put(KEY_NOTIFICATION_ID, notificationId)
+        obj.put(KEY_CHANNEL_ID, channelId)
+        obj.put(KEY_EVENT_TYPE, eventType)
+        obj.put(KEY_TITLE, title)
+        priority?.let { obj.put(KEY_PRIORITY, it) }
+        body?.let { obj.put(KEY_BODY, it) }
+        criticalText?.let { obj.put(KEY_CRITICAL_TEXT, it) }
+        whenMillis?.let { obj.put(KEY_WHEN, it) }
+        dismissAfterSeconds?.let { obj.put(KEY_DISMISS_AFTER, it) }
+        contentState?.let { obj.put(KEY_CONTENT_STATE, it) }
+        actionType?.let { obj.put(KEY_ACTION_TYPE, it) }
+        actionUri?.let { obj.put(KEY_ACTION_URI, it) }
+        actionButtons?.let { obj.put(KEY_ACTION_BUTTONS, it) }
+        topicName?.let { obj.put(KEY_TOPIC_NAME, it) }
+        smallIcon?.let { obj.put(KEY_SMALL_ICON, it) }
+        return obj.toString()
+    }
+
     companion object {
         private const val SELF_TAG = "LiveUpdatePayload"
 
         // SDK-canonical envelope keys
         private const val KEY_NOTIFICATION_ID = "notification_id"
-        private const val KEY_CHANNEL_ID = "channel_id"
+        private const val KEY_CHANNEL_ID = "notification_channel_id"
         private const val KEY_EVENT_TYPE = "event_type"
         private const val KEY_TITLE = "title"
         private const val KEY_PRIORITY = "priority"
@@ -94,6 +122,64 @@ class LiveUpdatePayload private constructor(
         const val EVENT_TYPE_UPDATE = "update"
         const val EVENT_TYPE_END = "end"
 
+        /**
+         * event_type value used when the host application triggers a Live Update locally
+         * via [LiveUpdates.triggerLocalLiveUpdate], as opposed to receiving it as an FCM
+         * push. Matches the iOS Live Activities `localStart` convention.
+         */
+        const val EVENT_TYPE_LOCAL_START = "localstart"
+
+        /**
+         * TODO(ergonomics): [create] takes 16 arguments to expose every envelope field.
+         * Consider a builder / DSL / partial-payload variant if callers commonly set only
+         * the required subset. For now the ceremony is intentional so new envelope fields
+         * force call-site updates.
+         *
+         * Constructs a [LiveUpdatePayload] directly from typed inputs, without an
+         * intermediate `RemoteMessage`. Primary use case is
+         * [LiveUpdates.triggerLocalLiveUpdate], where the host app raises a Live Update
+         * chip programmatically. Required inputs match the envelope's required fields
+         * (`notification_id`, `notification_channel_id`, `event_type`, `title`); everything else is
+         * optional and defaults to `null` / absent.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun create(
+            notificationId: String,
+            channelId: String,
+            eventType: String,
+            title: String,
+            priority: String? = null,
+            body: String? = null,
+            criticalText: String? = null,
+            whenMillis: Long? = null,
+            dismissAfterSeconds: Long? = null,
+            contentState: JSONObject? = null,
+            actionType: String? = null,
+            actionUri: String? = null,
+            actionButtons: JSONArray? = null,
+            topicName: String? = null,
+            smallIcon: String? = null,
+            xdm: JSONObject? = null
+        ): LiveUpdatePayload = LiveUpdatePayload(
+            notificationId = notificationId,
+            channelId = channelId,
+            eventType = eventType,
+            title = title,
+            priority = priority,
+            body = body,
+            criticalText = criticalText,
+            whenMillis = whenMillis,
+            dismissAfterSeconds = dismissAfterSeconds,
+            contentState = contentState,
+            actionType = actionType,
+            actionUri = actionUri,
+            actionButtons = actionButtons,
+            topicName = topicName,
+            smallIcon = smallIcon,
+            xdm = xdm
+        )
+
         /** Fast detection - does this [message] carry the Live Update envelope key? */
         @JvmStatic
         fun isLiveUpdate(message: RemoteMessage): Boolean =
@@ -102,7 +188,7 @@ class LiveUpdatePayload private constructor(
         /**
          * Parses [message] into a [LiveUpdatePayload]. Returns `null` when the envelope is
          * absent, malformed, or missing any required field (`notification_id`,
-         * `channel_id`, `event_type`, `title`).
+         * `notification_channel_id`, `event_type`, `title`).
          */
         @JvmStatic
         fun parse(message: RemoteMessage): LiveUpdatePayload? {
@@ -110,12 +196,22 @@ class LiveUpdatePayload private constructor(
             if (envelopeJson.isNullOrEmpty()) {
                 return null
             }
+            return fromEnvelopeJson(envelopeJson, message.data[DATA_KEY_XDM])
+        }
 
+        /**
+         * Re-hydrates a payload from a serialized envelope JSON string (as produced by
+         * [toEnvelopeJson]) plus an optional raw `_xdm` string. Shared by [parse] and by the
+         * interaction-intent round-trip (e.g. dismiss), where the SDK rebuilds the full
+         * payload from the PendingIntent extras. Returns null on malformed JSON or a missing
+         * required field.
+         */
+        internal fun fromEnvelopeJson(envelopeJson: String, xdmRaw: String?): LiveUpdatePayload? {
             val obj = try {
                 JSONObject(envelopeJson)
             } catch (e: JSONException) {
                 Log.debug(
-                    MessagingConstants.LOG_TAG,
+                    LiveUpdatesConstants.LOG_TAG,
                     SELF_TAG,
                     "Unable to parse adb_liveupdate_data: ${e.localizedMessage}"
                 )
@@ -130,12 +226,12 @@ class LiveUpdatePayload private constructor(
             // Parse the _xdm block as a typed JSONObject. Opaque to the SDK; null when
             // absent or unparseable. Carried through to the tracking dispatch so AJO
             // reporting can correlate via messageExecutionID / campaignID etc.
-            val xdm = message.data[DATA_KEY_XDM]?.takeIf { it.isNotEmpty() }?.let { raw ->
+            val xdm = xdmRaw?.takeIf { it.isNotEmpty() }?.let { raw ->
                 try {
                     JSONObject(raw)
                 } catch (e: JSONException) {
                     Log.debug(
-                        MessagingConstants.LOG_TAG,
+                        LiveUpdatesConstants.LOG_TAG,
                         SELF_TAG,
                         "Unable to parse _xdm: ${e.localizedMessage}"
                     )
@@ -143,7 +239,7 @@ class LiveUpdatePayload private constructor(
                 }
             }
 
-            return LiveUpdatePayload(
+            val payload = LiveUpdatePayload(
                 notificationId = notificationId,
                 channelId = channelId,
                 eventType = eventType,
@@ -161,6 +257,8 @@ class LiveUpdatePayload private constructor(
                 smallIcon = obj.optString(KEY_SMALL_ICON).takeIf { it.isNotEmpty() },
                 xdm = xdm
             )
+            Log.debug(LiveUpdatesConstants.LOG_TAG, SELF_TAG, "Parsed Live Update payload: $payload")
+            return payload
         }
 
         /** Reads a non-empty string field, logging a debug message and returning null if missing. */
@@ -168,7 +266,7 @@ class LiveUpdatePayload private constructor(
             val value = optString(key).takeIf { it.isNotEmpty() }
             if (value == null) {
                 Log.debug(
-                    MessagingConstants.LOG_TAG,
+                    LiveUpdatesConstants.LOG_TAG,
                     SELF_TAG,
                     "adb_liveupdate_data missing required field '$key'"
                 )

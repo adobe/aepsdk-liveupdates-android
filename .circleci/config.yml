@@ -1,0 +1,91 @@
+#
+# Copyright 2026 Adobe. All rights reserved.
+# This file is licensed to you under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License. You may obtain a copy
+# of the License at http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software distributed under
+# the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+# OF ANY KIND, either express or implied. See the License for the specific language
+# governing permissions and limitations under the License.
+#
+
+# Orb-free config (no circleci/android or codecov/codecov orbs), so it runs on a locked-down
+# self-hosted CircleCI (GitHub Enterprise) where registry orbs may be unavailable. It uses the
+# same cimg/android image the android orb wraps, plain restore_cache/save_cache, and the
+# Codecov CLI via curl.
+version: 2.1
+
+executors:
+  android:
+    docker:
+      # NOTE: pick a tag whose bundled Android SDK includes the module's compileSdk (36) and
+      # JDK 17+. If AGP has to download platform 36 at build time, this image allows it.
+      - image: cimg/android:2024.01.1
+    resource_class: medium
+
+workflows:
+  build-test:
+    jobs:
+      - build-and-unit-test
+      # Building the sample app only on the long-lived branches keeps PR runs fast.
+      - build-test-app:
+          filters:
+            branches:
+              only:
+                - main
+                - staging
+
+jobs:
+  # Builds the SDK, runs unit tests + coverage, and uploads the report to Codecov.
+  build-and-unit-test:
+    executor: android
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - gradle-{{ checksum "code/build.gradle.kts" }}
+            - gradle-
+      - run:
+          name: Assemble Phone (build the SDK)
+          command: make assemble-phone
+      - run:
+          name: Unit tests + coverage report
+          command: make unit-test-coverage
+      - save_cache:
+          key: gradle-{{ checksum "code/build.gradle.kts" }}
+          paths:
+            - ~/.gradle/caches
+            - ~/.gradle/wrapper
+      - store_test_results:
+          path: code/liveupdates/build/test-results/testPhoneDebugUnitTest
+      - store_artifacts:
+          path: code/liveupdates/build/reports/tests
+      - run:
+          name: Upload coverage to Codecov
+          command: |
+            # Requires CODECOV_TOKEN set as a CircleCI project environment variable.
+            # For a self-hosted Codecov, add:  --url https://<your-codecov-host>
+            curl -Os https://cli.codecov.io/latest/linux/codecov
+            chmod +x codecov
+            ./codecov upload-process \
+              --file code/liveupdates/build/reports/coverage/test/phone/debug/report.xml \
+              --flag unit-tests
+
+  # Builds the sample app so app-side breakage is caught.
+  build-test-app:
+    executor: android
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - gradle-{{ checksum "code/build.gradle.kts" }}
+            - gradle-
+      - run:
+          name: Assemble sample app
+          command: make assemble-app
+      - save_cache:
+          key: gradle-{{ checksum "code/build.gradle.kts" }}
+          paths:
+            - ~/.gradle/caches
+            - ~/.gradle/wrapper

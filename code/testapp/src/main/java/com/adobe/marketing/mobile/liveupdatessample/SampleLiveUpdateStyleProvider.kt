@@ -49,9 +49,6 @@ class SampleLiveUpdateStyleProvider(
         return when (templateType) {
             "progress" -> {
                 val progress = state?.optInt("custom_key_journey_progress", 0) ?: 0
-                // Four phase segments (boarding, takeoff, cruise, landing) of length 25
-                // each = 100 total. Segment colors give the bar its journey feel; the
-                // tracker icon (airplane) rides along the completed portion.
                 NotificationCompat.ProgressStyle()
                     .setProgress(progress)
                     .setProgressTrackerIcon(
@@ -59,13 +56,14 @@ class SampleLiveUpdateStyleProvider(
                     )
                     .setProgressSegments(
                         listOf(
-                            NotificationCompat.ProgressStyle.Segment(25)
+                            NotificationCompat.ProgressStyle.Segment(10)
                                 .setColor(SEGMENT_COLOR_BOARDING),
-                            NotificationCompat.ProgressStyle.Segment(25)
+                            NotificationCompat.ProgressStyle.Segment(30)
                                 .setColor(SEGMENT_COLOR_TAKEOFF),
-                            NotificationCompat.ProgressStyle.Segment(25)
+                            NotificationCompat.ProgressStyle.Segment(20)
                                 .setColor(SEGMENT_COLOR_CRUISE),
-                            NotificationCompat.ProgressStyle.Segment(25)
+                            // Segments sum to 100 to match the 0-100 custom_key_journey_progress scale.
+                            NotificationCompat.ProgressStyle.Segment(40)
                                 .setColor(SEGMENT_COLOR_LANDING)
                         )
                     )

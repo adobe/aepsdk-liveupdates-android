@@ -14,7 +14,32 @@ pluginManagement {
         gradlePluginPortal()
         google()
         mavenCentral()
+        // Required to resolve the aepsdk-commons Gradle plugin, referenced only by the
+        // :liveupdates module via the aep-* plugin id family below.
+        maven { url = uri("https://jitpack.io") }
         mavenLocal()
+    }
+    // The aepsdk-commons Gradle plugin does not publish plugin marker artifacts, so
+    // `plugins { id("aep-library") version "..." }` cannot resolve it directly.
+    // Redirect any `aep-*` plugin id to its Maven coordinate so the SDK module can keep
+    // using `plugins { id("aep-library") }` without pulling commons in at the project
+    // root. The testapp does not request any `aep-*` plugin, so this rule never fires
+    // during its resolution.
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id.startsWith("aep-")) {
+                useModule("com.github.adobe.aepsdk-commons:aepsdk-gradle-plugin:4.0.0")
+            }
+        }
+    }
+    // Plugin versions consumed by both modules. Values match what aepsdk-commons v4.0.0
+    // brings today, so moving off commons at the root does not change the toolchain.
+    plugins {
+        id("com.android.application") version "8.9.1" apply false
+        id("com.android.library") version "8.9.1" apply false
+        id("org.jetbrains.kotlin.android") version "2.0.21" apply false
+        id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
+        id("com.google.gms.google-services") version "4.4.1" apply false
     }
 }
 
