@@ -49,22 +49,16 @@ android {
     }
 }
 
-// Versions from gradle.properties — these only exist in ~/.m2, so resolution proves
-// we are in fact sourcing from mavenLocal.
 val mavenCoreVersion: String by project
 val mavenEdgeVersion: String by project
-val mavenMessagingVersion: String by project
 
 dependencies {
     // New Live Updates SDK under construction
     implementation(project(":liveupdates"))
 
-    // Core + Messaging from mavenLocal (versions 3.8.0 and 3.10.0 — not on Maven Central)
     implementation("com.adobe.marketing.mobile:core:$mavenCoreVersion")
-    implementation("com.adobe.marketing.mobile:messaging:$mavenMessagingVersion")
+    implementation("com.github.adobe:aepsdk-messaging-android:rc-liveupdates-SNAPSHOT")
     implementation("com.adobe.marketing.mobile:edge:$mavenEdgeVersion")
-
-    // Remaining AEP family from Maven Central (no local version to consume yet)
     implementation("com.adobe.marketing.mobile:lifecycle:3.0.2")
     implementation("com.adobe.marketing.mobile:edgeidentity:3.0.1")
     implementation("com.adobe.marketing.mobile:assurance:3.0.7")

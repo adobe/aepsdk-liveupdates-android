@@ -624,11 +624,8 @@ When/if Live Updates is folded into the Messaging SDK, the move is:
 | `LiveUpdateRenderer` | aepsdk-liveupdates-android | `code/liveupdates/src/main/java/com/adobe/marketing/mobile/messaging/liveupdate/LiveUpdateRenderer.kt` |
 | `LiveUpdateStyleProvider` | aepsdk-liveupdates-android | `code/liveupdates/src/main/java/com/adobe/marketing/mobile/messaging/liveupdate/LiveUpdateStyleProvider.kt` |
 
-### Current versions (maven local during dev)
+### Current versions
 
-- `com.adobe.marketing.mobile:core:3.8.0`  (no functional change vs. public 3.7.0; bumped only to verify maven-local sourcing)
+- `com.adobe.marketing.mobile:core:3.8.0`
 - `com.adobe.marketing.mobile:messaging:3.10.0`  (carries Live Update interface + envelope + handler dispatch)
 - `com.adobe.marketing.mobile:liveupdates:1.0.0`  (this repo)
-
-Both `core:3.8.0` and `messaging:3.10.0` are not yet published to Maven Central; resolving
-them confirms the build is consuming mavenLocal.
