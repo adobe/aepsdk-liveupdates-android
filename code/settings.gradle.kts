@@ -28,7 +28,7 @@ pluginManagement {
     resolutionStrategy {
         eachPlugin {
             if (requested.id.id.startsWith("aep-")) {
-                useModule("com.github.adobe.aepsdk-commons:aepsdk-gradle-plugin:4.0.0")
+                useModule("com.github.adobe:aepsdk-commons:dev-v4.0.0-SNAPSHOT")
             }
         }
     }
@@ -46,13 +46,9 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        // mavenLocal MUST come first — we publish core/messaging dev builds here and
-        // they need to win over jitpack/central, which may host older snapshots
-        // of the same coordinate (e.g. com.adobe.marketing.mobile:messaging:3.10.0 from
-        // a tagged build that predates our local changes).
-        mavenLocal()
         google()
         mavenCentral()
+        mavenLocal()
         maven { url = uri("https://central.sonatype.com/repository/maven-snapshots/") }
         maven { url = uri("https://jitpack.io") }
     }
