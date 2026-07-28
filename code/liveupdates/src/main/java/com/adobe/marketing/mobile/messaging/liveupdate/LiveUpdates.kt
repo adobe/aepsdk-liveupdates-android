@@ -806,4 +806,38 @@ object LiveUpdates {
             )
         }
     }
+
+    /**
+     * Re-hydrates the full [LiveUpdatePayload] from the extras on a chip-tap [intent] (set via
+     * [LiveUpdateHandlerImpl] at post time) and invokes [ILiveUpdateListener.onClick].
+     * No-op if no listener is registered or the payload extra is missing / unparseable.
+     * Called from [LiveUpdateTrackerActivity] for a chip body tap after tap tracking is dispatched.
+     */
+    internal fun notifyClicked(intent: Intent) {
+        val listener = LiveUpdateListenerStore.getListener() ?: return
+        val envelopeJson = intent.getStringExtra(EXTRA_PAYLOAD)
+        if (envelopeJson.isNullOrEmpty()) {
+            Log.debug(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "Cannot invoke onClick: tap intent carries no serialized payload."
+            )
+            return
+        }
+        val payload = LiveUpdatePayload.fromEnvelopeJson(envelopeJson, intent.getStringExtra(EXTRA_XDM))
+        if (payload == null) {
+            Log.debug(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "Cannot invoke onClick: serialized payload failed to re-hydrate."
+            )
+            return
+        }
+        try {
+            listener.onClick(payload)
+        } catch (e: Exception) {
+            Log.warning(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "ILiveUpdateListener.onClick threw an exception: ${e.localizedMessage}"
+            )
+        }
+    }
 }

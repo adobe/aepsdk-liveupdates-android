@@ -62,6 +62,12 @@ class LiveUpdateTrackerActivity : Activity() {
             customActionId = actionId
         )
 
+        // A chip body tap (no action id) invokes the app's onClick listener. Action-button
+        // clicks carry an action id and are excluded - they are a distinct interaction.
+        if (applicationOpened) {
+            LiveUpdates.notifyClicked(incoming)
+        }
+
         launchDestination(incoming)
     }
 

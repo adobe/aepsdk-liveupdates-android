@@ -150,6 +150,9 @@ class LiveUpdateHandlerImpl(
         val tapIntent = Intent(context, LiveUpdateTrackerActivity::class.java).apply {
             addTrackingExtras(payload)
             payload.actionUri?.let { putExtra(LiveUpdates.EXTRA_ACTION_URI, it) }
+            // Serialize the full payload so onClick can re-hydrate it, even if the app
+            // process was killed between post and tap (only the intent extras survive).
+            putExtra(LiveUpdates.EXTRA_PAYLOAD, payload.toEnvelopeJson())
         }
         return PendingIntent.getActivity(
             context,
