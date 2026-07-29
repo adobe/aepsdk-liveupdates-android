@@ -17,8 +17,6 @@ import android.app.NotificationManager
 import androidx.core.app.NotificationCompat
 import com.adobe.marketing.mobile.MobileCore
 import com.google.firebase.messaging.RemoteMessage
-import org.json.JSONArray
-import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -201,33 +199,7 @@ class LiveUpdateHandlerImplTest {
     }
 
     @Test
-    fun `postLiveUpdate adds one action per action button with a label and skips buttons missing a label or not a JSON object`() {
-        val buttons = JSONArray()
-            .put(JSONObject().put("label", "Snooze").put("uri", "app://snooze"))
-            .put(JSONObject().put("label", "Stop")) // valid, no uri
-            .put(JSONObject()) // missing label -> skipped
-            .put("not-an-object") // not a JSONObject -> skipped (optJSONObject returns null)
-        val payload = LiveUpdatePayload.create(
-            notificationId = "id1",
-            channelId = "chan",
-            eventType = LiveUpdatePayload.EVENT_TYPE_START,
-            title = "Title",
-            actionButtons = buttons,
-            topicName = "topicA",
-            xdm = JSONObject().put("campaignID", "camp1"),
-            actionUri = "app://tap-destination"
-        )
-
-        handler().postLiveUpdate(context, payload)
-
-        val notification = shadowOf(notificationManager()).allNotifications[0]
-        assertEquals(2, notification.actions?.size ?: 0)
-        assertEquals("Snooze", notification.actions[0].title)
-        assertEquals("Stop", notification.actions[1].title)
-    }
-
-    @Test
-    fun `postLiveUpdate with no action buttons adds no actions`() {
+    fun `postLiveUpdate never adds notification action buttons`() {
         val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T")
 
         handler().postLiveUpdate(context, payload)

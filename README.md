@@ -8,7 +8,7 @@ The SDK is a plain class library, not a registered `MobileCore` Extension: it di
 
 ### Public API surface (`LiveUpdates`)
 
-- `setLiveUpdateListener` / `getLiveUpdateListener` — register an `ILiveUpdateListener` for `onLiveUpdateReceived` / `onStart` / `onUpdate` / `onEnd` / `onDismissed` callbacks.
+- `setLiveUpdateListener` / `getLiveUpdateListener` — register an `ILiveUpdateListener` for `onLiveUpdateReceived` / `onStart` / `onUpdate` / `onEnd` / `onClick` / `onDismissed` callbacks.
 - `setLiveUpdateInterceptor` — register an `ILiveUpdateInterceptor` app-side gate consulted before a Live Update is rendered, tracked, or dispatched to the listener (e.g. to suppress a duplicate/late push for a chip the user already dismissed).
 - `trackLiveUpdateEvent` — manual entry point for apps that build and post the notification themselves but still want AJO tracking + listener dispatch.
 - `subscribeToTopic` / `unsubscribeFromTopic` — FCM topic helpers for the broadcast use case.
@@ -19,7 +19,7 @@ Integration happens through one of three patterns, all handled by the `aepsdk-me
 2. **Mixed** — app has its own `FirebaseMessagingService` and calls `MessagingService.handleRemoteMessage(context, message)` directly.
 3. **Manual** — app builds and posts the notification itself, then calls `LiveUpdates.trackLiveUpdateEvent(context, message)` for tracking + listener dispatch only.
 
-Chip interactions (tap, action-button click, swipe-to-dismiss) are tracked automatically: `LiveUpdateTrackerActivity` intercepts taps/action clicks before launching the real destination, and `LiveUpdateInteractionReceiver` (registered in the SDK's own manifest, no host app setup required) fires dismiss tracking when the user swipes a chip away.
+Chip interactions (tap and swipe-to-dismiss) are tracked automatically: `LiveUpdateTrackerActivity` fires `applicationOpened` tracking on a chip tap and then invokes the listener's `onClick` (the app decides what to open — the SDK does not launch a destination; there is no deep-link / web-URL or action-button support in this version), and `LiveUpdateInteractionReceiver` (registered in the SDK's own manifest, no host app setup required) fires dismiss tracking and invokes `onDismissed` when the user swipes a chip away.
 
 ## Toolchain
 

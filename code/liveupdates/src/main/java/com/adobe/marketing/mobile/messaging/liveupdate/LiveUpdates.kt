@@ -112,8 +112,6 @@ object LiveUpdates {
     internal const val EXTRA_XDM = "adb_liveupdate_xdm"
     internal const val EXTRA_EVENT_TYPE = "adb_liveupdate_event_type"
     internal const val EXTRA_CHANNEL_ID = "adb_liveupdate_channel_id"
-    internal const val EXTRA_ACTION_URI = "adb_liveupdate_action_uri"
-    internal const val EXTRA_ACTION_ID = "adb_liveupdate_action_id"
     // Full payload serialized as envelope JSON (see LiveUpdatePayload.toEnvelopeJson), carried
     // on interaction intents so the SDK can re-hydrate the complete payload for onDismissed
     // even after process death.
