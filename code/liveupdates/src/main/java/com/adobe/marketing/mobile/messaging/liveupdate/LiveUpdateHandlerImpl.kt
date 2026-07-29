@@ -118,8 +118,6 @@ class LiveUpdateHandlerImpl(
             }
         }
 
-        addActionButtons(context, builder, payload)
-
         val notification = builder.build()
 
         checkPromotionEligibility(context, notification)?.let { reason ->
@@ -149,7 +147,9 @@ class LiveUpdateHandlerImpl(
     ): PendingIntent {
         val tapIntent = Intent(context, LiveUpdateTrackerActivity::class.java).apply {
             addTrackingExtras(payload)
-            payload.actionUri?.let { putExtra(LiveUpdates.EXTRA_ACTION_URI, it) }
+            // Serialize the full payload so onClick can re-hydrate it, even if the app
+            // process was killed between post and tap (only the intent extras survive).
+            putExtra(LiveUpdates.EXTRA_PAYLOAD, payload.toEnvelopeJson())
         }
         return PendingIntent.getActivity(
             context,
@@ -180,45 +180,6 @@ class LiveUpdateHandlerImpl(
             dismissIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-    }
-
-    /**
-     * Adds one [NotificationCompat.Action] per entry in `payload.actionButtons`. Each entry
-     * must be a JSON object with `label` (required) and optional `uri`. All action buttons
-     * route through [LiveUpdateTrackerActivity]; the button's `label` rides as the
-     * `customActionId` (Messaging's convention) so tracking can distinguish which button
-     * fired the interaction.
-     */
-    private fun addActionButtons(
-        context: Context,
-        builder: NotificationCompat.Builder,
-        payload: LiveUpdatePayload
-    ) {
-        val buttons = payload.actionButtons ?: return
-        for (i in 0 until buttons.length()) {
-            val button = buttons.optJSONObject(i) ?: continue
-            val label = button.optString(KEY_ACTION_BUTTON_LABEL).takeIf { it.isNotEmpty() }
-            if (label == null) {
-                Log.debug(
-                    LiveUpdatesConstants.LOG_TAG, TAG,
-                    "Skipping action button at index $i: missing 'label' field."
-                )
-                continue
-            }
-            val uri = button.optString(KEY_ACTION_BUTTON_URI).takeIf { it.isNotEmpty() }
-            val actionIntent = Intent(context, LiveUpdateTrackerActivity::class.java).apply {
-                addTrackingExtras(payload)
-                putExtra(LiveUpdates.EXTRA_ACTION_ID, label)
-                uri?.let { putExtra(LiveUpdates.EXTRA_ACTION_URI, it) }
-            }
-            val actionPi = PendingIntent.getActivity(
-                context,
-                (payload.notificationId + label).hashCode(),
-                actionIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            builder.addAction(NotificationCompat.Action(0, label, actionPi))
-        }
     }
 
     /**
@@ -326,10 +287,6 @@ class LiveUpdateHandlerImpl(
         const val TAG = "LiveUpdateHandlerImpl"
         const val DEFAULT_CHANNEL_NAME = "Live Updates"
         const val DEFAULT_CHANNEL_DESCRIPTION = "Status-bar chips for AJO Live Updates"
-
-        // action_buttons entry field names.
-        const val KEY_ACTION_BUTTON_LABEL = "label"
-        const val KEY_ACTION_BUTTON_URI = "uri"
 
         // Keeps dismiss PendingIntent's request code distinct from tap's so
         // PendingIntent.FLAG_UPDATE_CURRENT does not collapse them.

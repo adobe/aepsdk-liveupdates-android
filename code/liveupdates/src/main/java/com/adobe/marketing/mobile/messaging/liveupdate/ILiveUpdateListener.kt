@@ -63,4 +63,18 @@ interface ILiveUpdateListener {
      * (as the sample does) so it survives process death.
      */
     fun onDismissed(payload: LiveUpdatePayload) {}
+
+    /**
+     * Fired when the user taps the Live Update chip body (an action-button click is a
+     * separate interaction and does not trigger this). Like [onDismissed], this fires from
+     * the SDK's tracker Activity on a later interaction, so the [payload] is re-hydrated from
+     * the data serialized onto the chip's tap intent at post time and reflects the most
+     * recently posted version of the chip - treat [LiveUpdatePayload.notificationId] as the
+     * reliable key and look up current state from your own store.
+     *
+     * Because this can run in a freshly-started process, the listener is only invoked if one
+     * is registered by the time the tap is handled - register it in `Application.onCreate`
+     * (as the sample does) so it survives process death.
+     */
+    fun onClick(payload: LiveUpdatePayload) {}
 }

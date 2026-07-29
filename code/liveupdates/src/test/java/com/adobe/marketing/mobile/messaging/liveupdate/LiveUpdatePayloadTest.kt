@@ -12,7 +12,6 @@
 package com.adobe.marketing.mobile.messaging.liveupdate
 
 import com.google.firebase.messaging.RemoteMessage
-import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -135,9 +134,6 @@ class LiveUpdatePayloadTest {
         assertNull(payload.whenMillis)
         assertNull(payload.dismissAfterSeconds)
         assertNull(payload.contentState)
-        assertNull(payload.actionType)
-        assertNull(payload.actionUri)
-        assertNull(payload.actionButtons)
         assertNull(payload.topicName)
         assertNull(payload.smallIcon)
         assertNull(payload.xdm)
@@ -146,7 +142,6 @@ class LiveUpdatePayloadTest {
     @Test
     fun `parse populates all optional fields`() {
         val contentState = JSONObject().put("custom_key_progress", 42)
-        val actionButtons = JSONArray().put(JSONObject().put("label", "Snooze").put("uri", "app://snooze"))
         val envelope = JSONObject()
             .put("notification_id", "id1")
             .put("notification_channel_id", "chan")
@@ -158,9 +153,6 @@ class LiveUpdatePayloadTest {
             .put("when", 12345L)
             .put("dismiss_after", 60L)
             .put("content_state", contentState)
-            .put("action_type", "deeplink")
-            .put("action_uri", "app://open")
-            .put("action_buttons", actionButtons)
             .put("topic_name", "topic1")
             .put("small_icon", "ic_flight")
         val xdmRaw = JSONObject().put("messageExecutionID", "exec1").toString()
@@ -175,9 +167,6 @@ class LiveUpdatePayloadTest {
         assertEquals(12345L, payload.whenMillis)
         assertEquals(60L, payload.dismissAfterSeconds)
         assertEquals(42, payload.contentState?.optInt("custom_key_progress"))
-        assertEquals("deeplink", payload.actionType)
-        assertEquals("app://open", payload.actionUri)
-        assertEquals(1, payload.actionButtons?.length())
         assertEquals("topic1", payload.topicName)
         assertEquals("ic_flight", payload.smallIcon)
         assertNotNull(payload.xdm)
@@ -232,7 +221,6 @@ class LiveUpdatePayloadTest {
     @Test
     fun `create with all fields populates every property`() {
         val contentState = JSONObject().put("k", "v")
-        val actionButtons = JSONArray().put(JSONObject().put("label", "Stop"))
         val xdm = JSONObject().put("campaignID", "c1")
         val payload = LiveUpdatePayload.create(
             notificationId = "id2",
@@ -245,9 +233,6 @@ class LiveUpdatePayloadTest {
             whenMillis = 999L,
             dismissAfterSeconds = 30L,
             contentState = contentState,
-            actionType = "deeplink",
-            actionUri = "app://x",
-            actionButtons = actionButtons,
             topicName = "topicX",
             smallIcon = "ic_x",
             xdm = xdm
@@ -258,9 +243,6 @@ class LiveUpdatePayloadTest {
         assertEquals(999L, payload.whenMillis)
         assertEquals(30L, payload.dismissAfterSeconds)
         assertEquals("v", payload.contentState?.optString("k"))
-        assertEquals("deeplink", payload.actionType)
-        assertEquals("app://x", payload.actionUri)
-        assertEquals(1, payload.actionButtons?.length())
         assertEquals("topicX", payload.topicName)
         assertEquals("ic_x", payload.smallIcon)
         assertEquals("c1", payload.xdm?.optString("campaignID"))
@@ -271,7 +253,6 @@ class LiveUpdatePayloadTest {
     @Test
     fun `round trip create toEnvelopeJson fromEnvelopeJson yields equal fields`() {
         val contentState = JSONObject().put("k", "v")
-        val actionButtons = JSONArray().put(JSONObject().put("label", "Stop"))
         val original = LiveUpdatePayload.create(
             notificationId = "id3",
             channelId = "chan3",
@@ -283,9 +264,6 @@ class LiveUpdatePayloadTest {
             whenMillis = 111L,
             dismissAfterSeconds = 10L,
             contentState = contentState,
-            actionType = "deeplink",
-            actionUri = "app://y",
-            actionButtons = actionButtons,
             topicName = "topicY",
             smallIcon = "ic_y"
         )
@@ -305,9 +283,6 @@ class LiveUpdatePayloadTest {
         assertEquals(original.whenMillis, rehydrated.whenMillis)
         assertEquals(original.dismissAfterSeconds, rehydrated.dismissAfterSeconds)
         assertEquals(original.contentState.toString(), rehydrated.contentState.toString())
-        assertEquals(original.actionType, rehydrated.actionType)
-        assertEquals(original.actionUri, rehydrated.actionUri)
-        assertEquals(original.actionButtons.toString(), rehydrated.actionButtons.toString())
         assertEquals(original.topicName, rehydrated.topicName)
         assertEquals(original.smallIcon, rehydrated.smallIcon)
     }
@@ -342,9 +317,6 @@ class LiveUpdatePayloadTest {
         assertFalse(json.has("when"))
         assertFalse(json.has("dismiss_after"))
         assertFalse(json.has("content_state"))
-        assertFalse(json.has("action_type"))
-        assertFalse(json.has("action_uri"))
-        assertFalse(json.has("action_buttons"))
         assertFalse(json.has("topic_name"))
         assertFalse(json.has("small_icon"))
         assertEquals("id5", json.optString("notification_id"))
