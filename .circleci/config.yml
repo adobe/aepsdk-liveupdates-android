@@ -1,4 +1,4 @@
-#
+ #
 # Copyright 2026 Adobe. All rights reserved.
 # This file is licensed to you under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License. You may obtain a copy
@@ -62,6 +62,15 @@ jobs:
       - store_artifacts:
           path: code/liveupdates/build/reports/tests
       - run:
+          name: Check CODECOV_TOKEN is set
+          command: |
+            # Never echo the token itself — only whether it's present and its length.
+            if [ -z "$CODECOV_TOKEN" ]; then
+              echo "CODECOV_TOKEN is NOT set in this job's environment."
+            else
+              echo "CODECOV_TOKEN is set (length: ${#CODECOV_TOKEN} chars)."
+            fi
+      - run:
           name: Upload coverage to Codecov
           command: |
             # Requires CODECOV_TOKEN set as a CircleCI project environment variable.
@@ -69,6 +78,7 @@ jobs:
             curl -Os https://cli.codecov.io/latest/linux/codecov
             chmod +x codecov
             ./codecov upload-process \
+              --token="$CODECOV_TOKEN" \
               --file code/liveupdates/build/reports/coverage/test/phone/debug/report.xml \
               --flag unit-tests
 
