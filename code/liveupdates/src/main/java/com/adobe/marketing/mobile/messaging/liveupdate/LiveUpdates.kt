@@ -19,6 +19,8 @@ import com.adobe.marketing.mobile.EventType
 import com.adobe.marketing.mobile.Messaging
 import com.adobe.marketing.mobile.MobileCore
 import com.adobe.marketing.mobile.services.Log
+import com.adobe.marketing.mobile.services.ServiceRegistry
+import com.adobe.marketing.mobile.services.notification.LiveActivityRenderer
 import com.google.firebase.messaging.RemoteMessage
 import org.json.JSONException
 import org.json.JSONObject
@@ -203,6 +205,22 @@ object LiveUpdates {
             )
             true
         }
+    }
+
+    // ---------- Extensible Services v2: host-neutral renderer registration ----------
+
+    /**
+     * Registers a [LiveActivityRendererAdapter] - wrapping a canonical [LiveUpdateHandlerImpl]
+     * built from [styleProvider] - as the [LiveActivityRenderer] port implementation in Core's
+     * [ServiceRegistry]. This lets any host (not only the Messaging extension's
+     * `setLiveUpdateHandler` path) discover and invoke Live Update rendering.
+     */
+    @JvmStatic
+    fun registerAsLiveActivityRenderer(styleProvider: ILiveUpdateStyleProvider) {
+        ServiceRegistry.getInstance().registerService(
+            LiveActivityRenderer::class.java,
+            LiveActivityRendererAdapter(LiveUpdateHandlerImpl(styleProvider))
+        )
     }
 
     // ---------- Pattern 3: manual Live Update event tracking ----------
