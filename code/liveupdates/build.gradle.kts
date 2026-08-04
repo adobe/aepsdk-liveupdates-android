@@ -44,7 +44,7 @@ dependencies {
 
     // Messaging — required for ILiveUpdateHandler interface, Messaging.setLiveUpdateHandler,
     // MessagingConstants.
-    implementation("com.github.adobe:aepsdk-messaging-android:rc-liveupdates-SNAPSHOT")
+    implementation("com.adobe.marketing.mobile:messaging:$mavenMessagingVersion")
 
     // Edge Network for Live Update lifecycle telemetry
     implementation("com.adobe.marketing.mobile:edge:$mavenEdgeVersion")
