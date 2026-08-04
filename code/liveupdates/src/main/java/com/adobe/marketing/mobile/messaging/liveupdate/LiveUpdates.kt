@@ -19,6 +19,8 @@ import com.adobe.marketing.mobile.EventType
 import com.adobe.marketing.mobile.Messaging
 import com.adobe.marketing.mobile.MobileCore
 import com.adobe.marketing.mobile.services.Log
+import com.adobe.marketing.mobile.services.ServiceProvider
+import com.adobe.marketing.mobile.services.plugin.LiveActivityPlugin
 import com.google.firebase.messaging.RemoteMessage
 import org.json.JSONException
 import org.json.JSONObject
@@ -152,6 +154,21 @@ object LiveUpdates {
     /** Returns the SDK version string. */
     @JvmStatic
     fun extensionVersion(): String = EXTENSION_VERSION
+
+    // ---------- Extensible Plugins registration ----------
+
+    /**
+     * Registers the canonical [LiveUpdateHandlerImpl] (wrapped in a [LiveActivityPluginImpl]
+     * adapter) with Core's [com.adobe.marketing.mobile.services.plugin.PluginRegistry] under
+     * the [LiveActivityPlugin] contract. Any host SDK that resolves a [LiveActivityPlugin]
+     * from the registry (Messaging, campaignclassic, assurance, ...) can then drive Live
+     * Update rendering without a compile dependency on this module.
+     */
+    @JvmStatic
+    fun register(styleProvider: ILiveUpdateStyleProvider) {
+        ServiceProvider.getInstance().pluginRegistry
+            .register(LiveActivityPlugin::class.java, LiveActivityPluginImpl(LiveUpdateHandlerImpl(styleProvider)))
+    }
 
     // ---------- Listener registration ----------
 

@@ -12,6 +12,7 @@
 package com.adobe.marketing.mobile.liveupdatessample
 
 import android.app.Application
+import android.content.Intent
 import android.util.Log
 import com.adobe.marketing.mobile.Assurance
 import com.adobe.marketing.mobile.Edge
@@ -48,10 +49,8 @@ class LiveUpdatesApplication : Application() {
             Assurance.EXTENSION
         )
         MobileCore.registerExtensions(extensions) {
-            // TODO: replace the placeholder below with the environment file id from your Adobe
-            // Data Collection (Launch) property before running the sample against real
-            // infrastructure. Without a valid id, events will not reach Adobe services.
-            MobileCore.configureWithAppID("<YOUR_ENVIRONMENT_FILE_ID>")
+            // TODO: replace with the environment file id from your Adobe Data Collection
+            // (Launch) property before running the sample app against real infrastructure.
             MobileCore.lifecycleStart(null)
 
             // Primary identity demonstration. AJO uses this to correlate server-side
@@ -64,20 +63,21 @@ class LiveUpdatesApplication : Application() {
                 )
             }
             Identity.updateIdentities(identityMap)
+            Assurance.startSession("lutest://app?adb_validation_sessionid=06c29485-8f80-4820-80de-1c4449de40fe")
         }
 
-        // Auto-mode integration: register a LiveUpdateHandlerImpl with the app's
-        // ILiveUpdateStyleProvider. The SDK takes over rendering on every incoming push
+        // Auto-mode integration: register with the app's ILiveUpdateStyleProvider via the
+        // Extensible Plugins registry. The SDK takes over rendering on every incoming push
         // whose data map carries `adb_liveupdate_data`.
-        Messaging.setLiveUpdateHandler(LiveUpdateHandlerImpl(SampleLiveUpdateStyleProvider(applicationContext)))
+        LiveUpdates.register(SampleLiveUpdateStyleProvider(applicationContext))
 
         // Interceptor demo: suppress Live Updates the user already dismissed. The store records
         // dismissed ids (see onDismissed below); the interceptor vetoes any incoming Live Update
         // whose id is in that set. Gated by SampleLiveUpdateInterceptor.DISCARD_DISMISSED_UPDATES.
-        val dismissedStore = DismissedLiveUpdateStore(applicationContext)
+       /* val dismissedStore = DismissedLiveUpdateStore(applicationContext)
         LiveUpdates.setLiveUpdateInterceptor(
             SampleLiveUpdateInterceptor(applicationContext, dismissedStore)
-        )
+        )*/
 
         // Optional: react to Live Update lifecycle events from the app side. The generic
         // onLiveUpdateReceived fires for every push; onStart / onUpdate / onEnd fire next
@@ -118,9 +118,6 @@ class LiveUpdatesApplication : Application() {
 
             override fun onEnd(payload: LiveUpdatePayload) {
                 Log.d(TAG, "Live Update END: id=${payload.notificationId} (chip will dismiss soon)")
-                // Mirror of onStart: unsubscribe from the topic when the Live Update ends
-                // and dispatch the corresponding tracking event on success.
-                unsubscribeFromTopic(payload)
             }
 
             override fun onDismissed(payload: LiveUpdatePayload) {
@@ -135,6 +132,17 @@ class LiveUpdatesApplication : Application() {
                     dismissedStore.markDismissed(payload.notificationId)
                 }
                 unsubscribeFromTopic(payload)
+            }
+
+            override fun onClick(payload: LiveUpdatePayload) {
+                Log.d(TAG, "Live Update CLICKED: id=${payload.notificationId} - opening the app.")
+                // The SDK fires applicationOpened tracking and hands the tap here; opening a
+                // screen is the app's responsibility. Launch MainActivity from the application
+                // context (NEW_TASK, since there is no activity in the back stack).
+                val intent = Intent(applicationContext, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                }
+                startActivity(intent)
             }
         })
     }
