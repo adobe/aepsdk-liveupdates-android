@@ -74,8 +74,8 @@ class LiveUpdatesApplication : Application() {
         // Interceptor demo: suppress Live Updates the user already dismissed. The store records
         // dismissed ids (see onDismissed below); the interceptor vetoes any incoming Live Update
         // whose id is in that set. Gated by SampleLiveUpdateInterceptor.DISCARD_DISMISSED_UPDATES.
-       /* val dismissedStore = DismissedLiveUpdateStore(applicationContext)
-        LiveUpdates.setLiveUpdateInterceptor(
+        val dismissedStore = DismissedLiveUpdateStore(applicationContext)
+        /* LiveUpdates.setLiveUpdateInterceptor(
             SampleLiveUpdateInterceptor(applicationContext, dismissedStore)
         )*/
 
