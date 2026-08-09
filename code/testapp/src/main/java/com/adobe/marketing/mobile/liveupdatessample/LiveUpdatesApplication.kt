@@ -24,7 +24,7 @@ import com.adobe.marketing.mobile.edge.identity.Identity
 import com.adobe.marketing.mobile.edge.identity.IdentityItem
 import com.adobe.marketing.mobile.edge.identity.IdentityMap
 import com.adobe.marketing.mobile.messaging.liveupdate.ILiveUpdateListener
-import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdateHandlerImpl
+import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePlugin
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdates
 import com.google.firebase.messaging.FirebaseMessaging
@@ -66,10 +66,10 @@ class LiveUpdatesApplication : Application() {
             Identity.updateIdentities(identityMap)
         }
 
-        // Auto-mode integration: register a LiveUpdateHandlerImpl with the app's
-        // ILiveUpdateStyleProvider. The SDK takes over rendering on every incoming push
-        // whose data map carries `adb_liveupdate_data`.
-        Messaging.setLiveUpdateHandler(LiveUpdateHandlerImpl(SampleLiveUpdateStyleProvider(applicationContext)))
+        // Auto-mode integration: register a LiveUpdatePlugin with the app's
+        // ILiveUpdateStyleProvider via MobileCore.addPlugins. The SDK takes over rendering on
+        // every incoming push whose data map carries `adb_liveupdate_data`.
+        MobileCore.addPlugins(LiveUpdatePlugin(SampleLiveUpdateStyleProvider(applicationContext)))
 
         // Interceptor demo: suppress Live Updates the user already dismissed. The store records
         // dismissed ids (see onDismissed below); the interceptor vetoes any incoming Live Update

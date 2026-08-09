@@ -20,21 +20,22 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import com.adobe.marketing.mobile.ILiveUpdateHandler
 import com.adobe.marketing.mobile.MobileCore
+import com.adobe.marketing.mobile.messaging.MessagingConstants
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload.Companion.EVENT_TYPE_END
+import com.adobe.marketing.mobile.plugin.ILiveupdatePlugin
 import com.adobe.marketing.mobile.services.Log
 import com.google.firebase.messaging.RemoteMessage
 
 /**
- * Canonical [ILiveUpdateHandler] implementation. Parses the [RemoteMessage] into a
+ * Canonical [ILiveupdatePlugin] implementation. Parses the [RemoteMessage] into a
  * [LiveUpdatePayload], asks the app-supplied [ILiveUpdateStyleProvider] for a style, builds
  * a fresh [NotificationCompat.Builder] from envelope fields only (no [MessagingPushBuilder]
  * reuse), and posts the resulting chip.
  *
  * Wire at app startup:
  * ```
- * Messaging.setLiveUpdateHandler(LiveUpdateHandlerImpl(MyStyleProvider()))
+ * MobileCore.addPlugins(LiveUpdatePlugin(MyStyleProvider()))
  * ```
  *
  * Drops the push (warning log, no notification posted) in these cases:
@@ -50,14 +51,40 @@ import com.google.firebase.messaging.RemoteMessage
  * style is not promotion-eligible). The notification still posts in that case — a non-promoted
  * ongoing notification is a degradation, not a failure.
  */
-class LiveUpdateHandlerImpl(
+class LiveUpdatePlugin(
     private val styleProvider: ILiveUpdateStyleProvider
-) : ILiveUpdateHandler {
+) : ILiveupdatePlugin {
 
-    override fun handleLiveUpdatePush(context: Context, message: RemoteMessage) {
-        val payload = LiveUpdatePayload.parse(message)
+    override fun handleLiveUpdatePush(context: Context, message: Any) {
+        // The push object arrives as Any (Core stays free of Firebase types); cast it back here.
+        val remoteMessage = message as? RemoteMessage
+        if (remoteMessage == null) {
+            Log.warning(
+                LiveUpdatesConstants.LOG_TAG,
+                TAG,
+                "Dropping Live Update: expected a Firebase RemoteMessage but received " +
+                    "${message.javaClass.name}."
+            )
+            return
+        }
+
+        // Log the raw envelope up front so any payload/parsing issue is diagnosable from logs
+        // even when parse() returns null without surfacing the specific failing field.
+        val rawEnvelope = remoteMessage.data[MessagingConstants.Push.PayloadKeys.LIVE_UPDATE_DATA]
+        Log.debug(
+            LiveUpdatesConstants.LOG_TAG,
+            TAG,
+            "handleLiveUpdatePush received. dataKeys=${remoteMessage.data.keys}; " +
+                "adb_liveupdate_data=$rawEnvelope"
+        )
+
+        val payload = LiveUpdatePayload.parse(remoteMessage)
         if (payload == null) {
-            Log.warning(LiveUpdatesConstants.LOG_TAG, TAG, "Dropping Live Update: failed to parse payload.")
+            Log.warning(
+                LiveUpdatesConstants.LOG_TAG,
+                TAG,
+                "Dropping Live Update: failed to parse payload. Raw adb_liveupdate_data=$rawEnvelope"
+            )
             return
         }
         // Consult the app-registered interceptor before any rendering / tracking / listener
@@ -284,7 +311,7 @@ class LiveUpdateHandlerImpl(
     }
 
     private companion object {
-        const val TAG = "LiveUpdateHandlerImpl"
+        const val TAG = "LiveUpdatePlugin"
         const val DEFAULT_CHANNEL_NAME = "Live Updates"
         const val DEFAULT_CHANNEL_DESCRIPTION = "Status-bar chips for AJO Live Updates"
 

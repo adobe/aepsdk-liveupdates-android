@@ -36,7 +36,7 @@ import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
-class LiveUpdateHandlerImplTest {
+class LiveUpdatePluginTest {
 
     private lateinit var mobileCoreMock: MockedStatic<MobileCore>
     private val context = RuntimeEnvironment.getApplication()
@@ -61,7 +61,7 @@ class LiveUpdateHandlerImplTest {
         context.getSystemService(NotificationManager::class.java)
 
     private fun handler(style: NotificationCompat.Style? = NotificationCompat.BigTextStyle()) =
-        LiveUpdateHandlerImpl(ILiveUpdateStyleProvider { style })
+        LiveUpdatePlugin(ILiveUpdateStyleProvider { style })
 
     private fun interceptorReturning(result: Boolean): ILiveUpdateInterceptor =
         object : ILiveUpdateInterceptor {
