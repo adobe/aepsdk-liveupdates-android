@@ -41,7 +41,7 @@ class SampleLiveUpdateInterceptor(
     private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun shouldDisplayLiveUpdate(payload: LiveUpdatePayload): Boolean {
-        if (!DISCARD_DISMISSED_UPDATES) return true
+       /* if (!DISCARD_DISMISSED_UPDATES) return true
 
         val id = payload.notificationId
         if (dismissedStore.isDismissed(id)) {
@@ -49,12 +49,12 @@ class SampleLiveUpdateInterceptor(
             mainHandler.post {
                 Toast.makeText(
                     appContext,
-                    "Dismissed Live Update arrived (id=$id) - discarded.",
+                    "Arrived Live update was already dismissed/ended.",
                     Toast.LENGTH_LONG
                 ).show()
             }
             return false
-        }
+        }*/
         return true
     }
 
