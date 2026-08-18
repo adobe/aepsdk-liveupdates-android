@@ -14,7 +14,6 @@ package com.adobe.marketing.mobile.messaging.liveupdate
 import com.adobe.marketing.mobile.messaging.MessagingConstants
 import com.adobe.marketing.mobile.services.Log
 import com.google.firebase.messaging.RemoteMessage
-import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 
@@ -45,11 +44,6 @@ class LiveUpdatePayload private constructor(
     val whenMillis: Long?,
     val dismissAfterSeconds: Long?,
     val contentState: JSONObject?,
-
-    // Tap action fields (renderer / tracker activity will wire these once LIVEUP-5 lands).
-    val actionType: String?,
-    val actionUri: String?,
-    val actionButtons: JSONArray?,
 
     // `topicName` rides through to the tracking dispatch as
     // pushChannelContext.liveActivity.channelID. The StyleProvider does NOT read it.
@@ -94,9 +88,6 @@ class LiveUpdatePayload private constructor(
         whenMillis?.let { obj.put(KEY_WHEN, it) }
         dismissAfterSeconds?.let { obj.put(KEY_DISMISS_AFTER, it) }
         contentState?.let { obj.put(KEY_CONTENT_STATE, it) }
-        actionType?.let { obj.put(KEY_ACTION_TYPE, it) }
-        actionUri?.let { obj.put(KEY_ACTION_URI, it) }
-        actionButtons?.let { obj.put(KEY_ACTION_BUTTONS, it) }
         topicName?.let { obj.put(KEY_TOPIC_NAME, it) }
         smallIcon?.let { obj.put(KEY_SMALL_ICON, it) }
         return obj.toString()
@@ -116,9 +107,6 @@ class LiveUpdatePayload private constructor(
         private const val KEY_WHEN = "when"
         private const val KEY_DISMISS_AFTER = "dismiss_after"
         private const val KEY_CONTENT_STATE = "content_state"
-        private const val KEY_ACTION_TYPE = "action_type"
-        private const val KEY_ACTION_URI = "action_uri"
-        private const val KEY_ACTION_BUTTONS = "action_buttons"
         private const val KEY_TOPIC_NAME = "topic_name"
         private const val KEY_SMALL_ICON = "small_icon"
 
@@ -138,11 +126,6 @@ class LiveUpdatePayload private constructor(
         const val EVENT_TYPE_LOCAL_START = "localstart"
 
         /**
-         * TODO(ergonomics): [create] takes 16 arguments to expose every envelope field.
-         * Consider a builder / DSL / partial-payload variant if callers commonly set only
-         * the required subset. For now the ceremony is intentional so new envelope fields
-         * force call-site updates.
-         *
          * Constructs a [LiveUpdatePayload] directly from typed inputs, without an
          * intermediate `RemoteMessage`. Primary use case is
          * [LiveUpdates.triggerLocalLiveUpdate], where the host app raises a Live Update
@@ -163,9 +146,6 @@ class LiveUpdatePayload private constructor(
             whenMillis: Long? = null,
             dismissAfterSeconds: Long? = null,
             contentState: JSONObject? = null,
-            actionType: String? = null,
-            actionUri: String? = null,
-            actionButtons: JSONArray? = null,
             topicName: String? = null,
             smallIcon: String? = null,
             xdm: JSONObject? = null
@@ -180,9 +160,6 @@ class LiveUpdatePayload private constructor(
             whenMillis = whenMillis,
             dismissAfterSeconds = dismissAfterSeconds,
             contentState = contentState,
-            actionType = actionType,
-            actionUri = actionUri,
-            actionButtons = actionButtons,
             topicName = topicName,
             smallIcon = smallIcon,
             xdm = xdm
@@ -258,9 +235,6 @@ class LiveUpdatePayload private constructor(
                 whenMillis = if (obj.has(KEY_WHEN)) obj.optLong(KEY_WHEN) else null,
                 dismissAfterSeconds = if (obj.has(KEY_DISMISS_AFTER)) obj.optLong(KEY_DISMISS_AFTER) else null,
                 contentState = obj.optJSONObject(KEY_CONTENT_STATE),
-                actionType = obj.optString(KEY_ACTION_TYPE).takeIf { it.isNotEmpty() },
-                actionUri = obj.optString(KEY_ACTION_URI).takeIf { it.isNotEmpty() },
-                actionButtons = obj.optJSONArray(KEY_ACTION_BUTTONS),
                 topicName = obj.optString(KEY_TOPIC_NAME).takeIf { it.isNotEmpty() },
                 smallIcon = obj.optString(KEY_SMALL_ICON).takeIf { it.isNotEmpty() },
                 xdm = xdm

@@ -40,12 +40,11 @@ dependencies {
     // NotificationManagerCompat — all in androidx.core 1.17.0 (MANDATORY)
     implementation(BuildConstants.Dependencies.ANDROIDX_CORE_KTX)
 
-    // AEP extension registration and Event Hub — sourced from mavenLocal at 3.8.0
     implementation("com.adobe.marketing.mobile:core:$mavenCoreVersion")
 
     // Messaging — required for ILiveUpdateHandler interface, Messaging.setLiveUpdateHandler,
-    // MessagingConstants. Sourced from mavenLocal at 3.10.0.
-    implementation("com.adobe.marketing.mobile:messaging:$mavenMessagingVersion")
+    // MessagingConstants.
+    implementation("com.github.adobe:aepsdk-messaging-android:rc-liveupdates-SNAPSHOT")
 
     // Edge Network for Live Update lifecycle telemetry
     implementation("com.adobe.marketing.mobile:edge:$mavenEdgeVersion")
