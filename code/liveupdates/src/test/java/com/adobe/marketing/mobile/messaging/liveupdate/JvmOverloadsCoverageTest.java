@@ -26,7 +26,7 @@ import org.mockito.Mockito;
  * {@code @JvmOverloads} generates one extra Java-callable overload per optional trailing
  * parameter (e.g. {@link LiveUpdatePayload#create}, {@link LiveUpdates#trackTopicSubscribed},
  * {@link LiveUpdates#handleNotificationResponse}). Kotlin call sites never dispatch to these
- * generated overloads - the Kotlin compiler always calls the single master method with
+ * generated overloads - the Kotlin compiler always calls the single primary method with
  * defaults substituted inline - so a Kotlin-only test suite leaves the generated overloads
  * themselves unexecuted. This small Java test file calls those shorter-arity overloads
  * directly, the way a Java consumer of the SDK would, to close that coverage gap.
