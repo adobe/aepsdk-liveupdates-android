@@ -23,18 +23,28 @@ import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import com.adobe.marketing.mobile.Assurance
-import com.adobe.marketing.mobile.Messaging
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,12 +52,30 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import com.adobe.marketing.mobile.Assurance
+import com.adobe.marketing.mobile.Messaging
+import com.adobe.marketing.mobile.MobileCore
+import com.adobe.marketing.mobile.edge.identity.Identity
 import com.google.firebase.messaging.FirebaseMessaging
-import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload
-import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdates
-import org.json.JSONObject
+
+// Blue color scheme so the app bar / buttons render blue instead of the Material3 default purple.
+private val LiveUpdatesBlueColors = lightColorScheme(
+    primary = Color(0xFF1565C0),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFD6E3FF),
+    onPrimaryContainer = Color(0xFF001B3E),
+    secondary = Color(0xFF00639B),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFCFE5FF),
+    onSecondaryContainer = Color(0xFF001D33)
+)
+
+/** One synced identity, as read from the Experience Platform IdentityMap. */
+private data class IdentityRow(val namespace: String, val value: String, val isPrimary: Boolean)
 
 class MainActivity : ComponentActivity() {
 
@@ -57,10 +85,12 @@ class MainActivity : ComponentActivity() {
 
     private var fcmToken by mutableStateOf<String?>(null)
 
+    // Synced identities, ECID first. Populated from Identity.getIdentities(...).
+    private var identities by mutableStateOf<List<IdentityRow>>(emptyList())
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // LiveUpdate wiring lives in LiveUpdatesApplication.onCreate now - single call to
-        // Messaging.setLiveUpdateHandler(LiveUpdateHandlerImpl(...)).
+        // LiveUpdate wiring lives in LiveUpdatesApplication.onCreate.
         requestNotificationPermission()
         fetchFcmToken()
 
@@ -73,29 +103,30 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             var showTopics by remember { mutableStateOf(false) }
-            MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    if (showTopics) {
-                        TopicsScreen(
-                            fcmToken = fcmToken,
-                            onBack = { showTopics = false }
-                        )
-                    } else {
-                        LiveUpdateInfoScreen(
-                            fcmToken = fcmToken,
-                            onOpenTopics = { showTopics = true }
-                        )
-                    }
+            MaterialTheme(colorScheme = LiveUpdatesBlueColors) {
+                if (showTopics) {
+                    TopicsScreen(
+                        fcmToken = fcmToken,
+                        onBack = { showTopics = false }
+                    )
+                } else {
+                    LiveUpdateInfoScreen(
+                        fcmToken = fcmToken,
+                        identities = identities,
+                        onOpenTopics = { showTopics = true }
+                    )
                 }
             }
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        fetchIdentities()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        // Called when the activity is reused (launchMode="singleTop"). Fire tracking for
-        // the new tap. The new intent will already carry the messageId + xdm extras
-        // injected by SampleNotificationService via Messaging.addPushTrackingDetails.
         setIntent(intent)
         fireTapTrackingIfAny(intent)
         startAssuranceSessionIfAny(intent)
@@ -149,75 +180,157 @@ class MainActivity : ComponentActivity() {
             Log.d(TAG, "FCM_TOKEN=$token")
         }
     }
+
+    /**
+     * Fetches the current Experience Platform identities via [Identity.getIdentities] and
+     * flattens them to (namespace -> value) pairs for display, ECID first then the rest
+     * (alphabetically). The callback runs on a background thread, so state is updated on
+     * the main thread.
+     */
+    private fun fetchIdentities() {
+        Identity.getIdentities { identityMap ->
+            if (identityMap == null) return@getIdentities
+            val ordered = mutableListOf<IdentityRow>()
+            // ECID first.
+            identityMap.getIdentityItemsForNamespace("ECID").forEach {
+                ordered.add(IdentityRow("ECID", it.id, it.isPrimary))
+            }
+            // Then every other namespace (e.g. Email), alphabetically for a stable order.
+            identityMap.namespaces
+                .filter { it != "ECID" }
+                .sorted()
+                .forEach { namespace ->
+                    identityMap.getIdentityItemsForNamespace(namespace).forEach {
+                        ordered.add(IdentityRow(namespace, it.id, it.isPrimary))
+                    }
+                }
+            runOnUiThread { identities = ordered }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LiveUpdateInfoScreen(
+    fcmToken: String?,
+    identities: List<IdentityRow>,
+    onOpenTopics: () -> Unit
+) {
+    val context = LocalContext.current
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Live Updates") },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = if (fcmToken != null) "✅ FCM token ready" else "⏳ Loading FCM token…",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    if (fcmToken != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = fcmToken,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedButton(onClick = { copyToClipboard(context, fcmToken, "FCM token") }) {
+                            Text("Copy token")
+                        }
+                    }
+                }
+            }
+
+            // Sync the FCM token to Adobe as the push identifier (mirrors the Messaging sample).
+            Button(
+                onClick = {
+                    if (fcmToken.isNullOrEmpty()) {
+                        Toast.makeText(context, "FCM token not ready yet.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        MobileCore.setPushIdentifier(fcmToken)
+                        Toast.makeText(context, "Synced push identifier with Adobe.", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Sync push identifier") }
+
+            Button(onClick = onOpenTopics, modifier = Modifier.fillMaxWidth()) {
+                Text("Manage FCM topics")
+            }
+
+            // Quick Connect: pairs with Assurance without a QR code / deeplink session id.
+            // No-ops on non-debuggable builds or if a session is already active.
+            OutlinedButton(
+                onClick = { Assurance.startSession() },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Connect Assurance (Quick Connect)") }
+
+            IdentitiesCard(identities = identities)
+        }
+    }
 }
 
 @Composable
-private fun LiveUpdateInfoScreen(fcmToken: String?, onOpenTopics: () -> Unit) {
+private fun IdentitiesCard(identities: List<IdentityRow>) {
     val context = LocalContext.current
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(
-            text = "Live Updates sample",
-            style = MaterialTheme.typography.headlineSmall
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = if (fcmToken != null) "✅ FCM token ready" else "⏳ Loading FCM token…",
-            style = MaterialTheme.typography.bodyMedium
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        if (fcmToken != null) {
-            Text(
-                text = fcmToken,
-                style = MaterialTheme.typography.bodySmall
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = { copyToClipboard(context, fcmToken, "FCM token") }) {
-                Text("Copy FCM token")
+    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Synced identities", style = MaterialTheme.typography.titleMedium)
+            if (identities.isEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "No identities yet.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            } else {
+                identities.forEach { row ->
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(text = row.namespace, style = MaterialTheme.typography.labelLarge)
+                                if (row.isPrimary) {
+                                    Text(
+                                        text = "  •  PRIMARY",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                            Text(text = row.value, style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (row.namespace == "ECID") {
+                            IconButton(onClick = { copyToClipboard(context, row.value, "ECID") }) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_content_copy),
+                                    contentDescription = "Copy ECID",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+                }
             }
-        }
-        Spacer(modifier = Modifier.height(24.dp))
-        Text(
-            text = "Use this token as the target when sending FCM Live Update pushes to the device.",
-            style = MaterialTheme.typography.bodySmall
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-        Button(onClick = onOpenTopics) {
-            Text("Manage FCM topics")
-        }
-        Spacer(modifier = Modifier.height(16.dp))
-        // Quick Connect: pairs with Assurance without a QR code / deeplink session id.
-        // No-ops on non-debuggable builds or if a session is already active.
-        Button(onClick = { Assurance.startSession() }) {
-            Text("Start Assurance session (Quick Connect)")
-        }
-        Spacer(modifier = Modifier.height(16.dp))
-        // Local test trigger (manual QA aid, intentionally kept in the sample app): raises a
-        // Live Update through the SDK's own render path (LiveUpdates.triggerLocalLiveUpdate ->
-        // postLiveUpdate -> styleProvider -> notify) with no FCM round-trip, so chip rendering
-        // can be verified directly on a device/emulator without sending a push.
-        Button(onClick = {
-            val payload = LiveUpdatePayload.create(
-                notificationId = "local_test_1",
-                channelId = "live_updates_channel",
-                eventType = LiveUpdatePayload.EVENT_TYPE_LOCAL_START,
-                title = "Local test chip",
-                body = "Rendered via triggerLocalLiveUpdate",
-                criticalText = "LIVE",
-                contentState = JSONObject()
-                    .put("custom_key_template_type", "progress")
-                    .put("custom_key_journey_progress", 10)
-            )
-            val ok = LiveUpdates.triggerLocalLiveUpdate(context, payload)
-            Toast.makeText(context, "triggerLocalLiveUpdate=$ok", Toast.LENGTH_LONG).show()
-        }) {
-            Text("TEST: local chip")
         }
     }
 }
