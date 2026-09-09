@@ -1,13 +1,51 @@
 {
   "project_info": {
-    "project_number": "000000000000",
-    "project_id": "YOUR_FIREBASE_PROJECT_ID",
-    "storage_bucket": "YOUR_FIREBASE_PROJECT_ID.appspot.com"
+    "project_number": "954459847821",
+    "project_id": "aep-sdk-test-hsk",
+    "storage_bucket": "aep-sdk-test-hsk.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+        "mobilesdk_app_id": "1:954459847821:android:4a2f93ddf34efb020b76c4",
+        "android_client_info": {
+          "package_name": "com.adobe.campaignclassictestapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDkYRiFSOEpCZ0OVzofrKpXxkYdcF8syB4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:954459847821:android:d30d1e86a5aca7970b76c4",
+        "android_client_info": {
+          "package_name": "com.adobe.campaigntestapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDkYRiFSOEpCZ0OVzofrKpXxkYdcF8syB4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:954459847821:android:0457562461e38bb10b76c4",
         "android_client_info": {
           "package_name": "com.adobe.marketing.mobile.liveupdatessample"
         }
@@ -15,7 +53,45 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "YOUR_FIREBASE_API_KEY"
+          "current_key": "AIzaSyDkYRiFSOEpCZ0OVzofrKpXxkYdcF8syB4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:954459847821:android:7f92319ad2594afe0b76c4",
+        "android_client_info": {
+          "package_name": "com.adobe.marketing.mobile.messagingsample"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDkYRiFSOEpCZ0OVzofrKpXxkYdcF8syB4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:954459847821:android:d7f2a14c736658bf0b76c4",
+        "android_client_info": {
+          "package_name": "com.adobe.marketing.mobile.pushtestapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDkYRiFSOEpCZ0OVzofrKpXxkYdcF8syB4"
         }
       ],
       "services": {

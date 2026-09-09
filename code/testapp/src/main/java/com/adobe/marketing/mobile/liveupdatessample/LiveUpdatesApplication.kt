@@ -24,7 +24,7 @@ import com.adobe.marketing.mobile.edge.identity.Identity
 import com.adobe.marketing.mobile.edge.identity.IdentityItem
 import com.adobe.marketing.mobile.edge.identity.IdentityMap
 import com.adobe.marketing.mobile.messaging.liveupdate.ILiveUpdateListener
-import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdateHandlerImpl
+import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePlugin
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdates
 import com.google.firebase.messaging.FirebaseMessaging
@@ -48,10 +48,7 @@ class LiveUpdatesApplication : Application() {
             Assurance.EXTENSION
         )
         MobileCore.registerExtensions(extensions) {
-            // TODO: replace the placeholder below with the environment file id from your Adobe
-            // Data Collection (Launch) property before running the sample against real
-            // infrastructure. Without a valid id, events will not reach Adobe services.
-            MobileCore.configureWithAppID("<YOUR_ENVIRONMENT_FILE_ID>")
+            MobileCore.configureWithAppID("staging/1b50a869c4a2/72557653d422/launch-51bcfc552b32") //CJM STAGE VA7
             MobileCore.lifecycleStart(null)
 
             // Primary identity demonstration. AJO uses this to correlate server-side
@@ -65,19 +62,13 @@ class LiveUpdatesApplication : Application() {
             }
             Identity.updateIdentities(identityMap)
         }
-
-        // Auto-mode integration: register a LiveUpdateHandlerImpl with the app's
-        // ILiveUpdateStyleProvider. The SDK takes over rendering on every incoming push
-        // whose data map carries `adb_liveupdate_data`.
-        Messaging.setLiveUpdateHandler(LiveUpdateHandlerImpl(SampleLiveUpdateStyleProvider(applicationContext)))
-
-        // Interceptor demo: suppress Live Updates the user already dismissed. The store records
-        // dismissed ids (see onDismissed below); the interceptor vetoes any incoming Live Update
-        // whose id is in that set. Gated by SampleLiveUpdateInterceptor.DISCARD_DISMISSED_UPDATES.
+        MobileCore.addPlugins(LiveUpdatePlugin(SampleLiveUpdateStyleProvider(applicationContext)))
+        Assurance.startSession("liveupdatesampleapp://?adb_validation_sessionid=061c656f-4801-4e0b-8939-d8f862e5f058&env=qa")
         val dismissedStore = DismissedLiveUpdateStore(applicationContext)
         LiveUpdates.setLiveUpdateInterceptor(
             SampleLiveUpdateInterceptor(applicationContext, dismissedStore)
         )
+        MobileCore.trackAction("Init", null)
 
         // Optional: react to Live Update lifecycle events from the app side. The generic
         // onLiveUpdateReceived fires for every push; onStart / onUpdate / onEnd fire next
