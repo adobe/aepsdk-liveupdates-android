@@ -28,6 +28,9 @@ checkformat:
 checkstyle:
 	(./code/gradlew -p code/$(EXTENSION-LIBRARY-FOLDER-NAME) checkstyle)
 
+# Aggregate lint gate invoked by the CI "Validate Code" job (Spotless formatting + Checkstyle).
+lint: checkformat checkstyle
+
 # Remove build outputs (also clears the JReleaser staging-deploy dir before a snapshot publish).
 clean:
 	(./code/gradlew -p code clean)
