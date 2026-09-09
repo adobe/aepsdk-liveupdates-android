@@ -27,3 +27,30 @@ checkformat:
 
 checkstyle:
 	(./code/gradlew -p code/$(EXTENSION-LIBRARY-FOLDER-NAME) checkstyle)
+
+# Aggregate lint gate invoked by the CI "Validate Code" job (Spotless formatting + Checkstyle).
+lint: checkformat checkstyle
+
+# Remove build outputs (also clears the JReleaser staging-deploy dir before a snapshot publish).
+clean:
+	(./code/gradlew -p code clean)
+
+# Generate Javadoc (Dokka) — consumed by the CI Javadoc job.
+javadoc:
+	(./code/gradlew -p code/$(EXTENSION-LIBRARY-FOLDER-NAME) dokkaJavadoc)
+
+# Build the release variant of the SDK (prerequisite for publishing).
+assemble-phone-release:
+	(./code/gradlew -p code/$(EXTENSION-LIBRARY-FOLDER-NAME) assemblePhoneRelease)
+
+# Publish the release build to the local Maven cache for JitPack consumption.
+ci-publish-maven-local-jitpack: assemble-phone-release
+	(./code/gradlew -p code/$(EXTENSION-LIBRARY-FOLDER-NAME) publishReleasePublicationToMavenLocal -Pjitpack)
+
+# Stage a snapshot into the JReleaser deploy directory (deployed to the Central Portal by CI).
+ci-publish-staging: clean
+	(./code/gradlew -p code/$(EXTENSION-LIBRARY-FOLDER-NAME) publish)
+
+# Stage a release into the JReleaser deploy directory (deployed to the Central Portal by CI).
+ci-publish: assemble-phone-release
+	(./code/gradlew -p code/$(EXTENSION-LIBRARY-FOLDER-NAME) publish -Prelease)
