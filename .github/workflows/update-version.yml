@@ -1,0 +1,63 @@
+#
+# Copyright 2026 Adobe. All rights reserved.
+# This file is licensed to you under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License. You may obtain a copy
+# of the License at http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software distributed under
+# the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+# OF ANY KIND, either express or implied. See the License for the specific language
+# governing permissions and limitations under the License.
+#
+
+name: Update Versions
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'New version to use for the extension (ex: 1.2.3).'
+        type: string
+        required: true
+
+      branch:
+        description: 'The target branch where the version update will be applied and the pull request will be merged into.'
+        type: string
+        required: true
+
+      core-dependency:
+        description: |
+          If a version is provided, update Core dependency in gradle.properties (ex: 1.2.3).
+          This is a published dependency in the pom.xml file.
+        type: string
+        required: false
+        default: ''
+
+      edge-dependency:
+        description: |
+          If a version is provided, update Edge dependency in gradle.properties (ex: 1.2.3).
+          This is a published dependency in the pom.xml file.
+        type: string
+        required: false
+        default: ''
+
+      messaging-dependency:
+        description: |
+          If a version is provided, update Messaging dependency in gradle.properties (ex: 1.2.3).
+          This is a published dependency in the pom.xml file.
+        type: string
+        required: false
+        default: ''
+
+# NOTE: This is a stub registration so GitHub recognizes the workflow_dispatch
+# trigger on the default branch. The real job (calling
+# adobe/aepsdk-commons/.github/workflows/versions.yml) is still being developed
+# on MOB-25516/github-actions-workflow and can be dispatched for testing via:
+#   gh workflow run update-version.yml --ref MOB-25516/github-actions-workflow -f version=... -f branch=...
+# Once finalized, replace the job below with the real reusable-workflow call.
+jobs:
+  update-versions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Stub - no-op
+        run: echo "update-version workflow stub - real logic pending on MOB-25516/github-actions-workflow"
