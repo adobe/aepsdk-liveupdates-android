@@ -27,3 +27,12 @@ checkformat:
 
 checkstyle:
 	(./code/gradlew -p code/$(EXTENSION-LIBRARY-FOLDER-NAME) checkstyle)
+
+# Used by the aepsdk-commons "android-validate-code" reusable workflow (build-and-test.yml).
+lint: checkformat checkstyle
+
+# Used by the aepsdk-commons "android-javadoc" reusable workflow (build-and-test.yml).
+# enableDokkaDoc = true in build.gradle.kts wires up this task; output defaults to
+# code/liveupdates/build/dokka/javadoc, matched by javadoc-build-path in the workflow.
+javadoc:
+	(./code/gradlew -p code/$(EXTENSION-LIBRARY-FOLDER-NAME) dokkaJavadoc)
