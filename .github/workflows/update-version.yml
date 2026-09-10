@@ -23,7 +23,8 @@ on:
       branch:
         description: 'The target branch where the version update will be applied and the pull request will be merged into.'
         type: string
-        required: true
+        required: false
+        default: ''
 
       core-dependency:
         description: |
@@ -49,15 +50,16 @@ on:
         required: false
         default: ''
 
-# NOTE: This is a stub registration so GitHub recognizes the workflow_dispatch
-# trigger on the default branch. The real job (calling
-# adobe/aepsdk-commons/.github/workflows/versions.yml) is still being developed
-# on MOB-25516/github-actions-workflow and can be dispatched for testing via:
-#   gh workflow run update-version.yml --ref MOB-25516/github-actions-workflow -f version=... -f branch=...
-# Once finalized, replace the job below with the real reusable-workflow call.
 jobs:
   update-versions:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Stub - no-op
-        run: echo "update-version workflow stub - real logic pending on MOB-25516/github-actions-workflow"
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: adobe/aepsdk-commons/.github/workflows/versions.yml@dev-v4.0.0
+    with:
+      version: ${{ github.event.inputs.version }}
+      branch: ${{ github.event.inputs.branch || github.ref_name }}
+      paths: code/gradle.properties, code/liveupdates/src/main/java/com/adobe/marketing/mobile/messaging/liveupdate/LiveUpdates.kt
+      dependencies: Core ${{ github.event.inputs.core-dependency }}, Edge ${{ github.event.inputs.edge-dependency }}, Messaging ${{ github.event.inputs.messaging-dependency }}
+      update: true
+    secrets: inherit
