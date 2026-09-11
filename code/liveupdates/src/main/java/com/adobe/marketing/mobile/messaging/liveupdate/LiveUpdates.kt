@@ -293,6 +293,21 @@ object LiveUpdates {
     }
 
     /**
+     * Returns `true` if [intent] carries the tracking extras added by [addPushTrackingDetails]
+     * (or by the SDK's own tracker Activity / dismiss receiver) - i.e. this intent originated
+     * from a Live Update chip. Lets a manual-mode app cheaply check, before calling
+     * [handleNotificationResponse], whether an incoming intent is one of its own Live Update
+     * interactions versus an unrelated standard push.
+     *
+     * @return `true` if [intent] is non-null and carries the Live Update notification id extra;
+     *         `false` otherwise.
+     */
+    @JvmStatic
+    fun isLiveUpdateIntent(intent: Intent?): Boolean {
+        return !intent?.getStringExtra(EXTRA_NOTIFICATION_ID).isNullOrEmpty()
+    }
+
+    /**
      * Dispatches a Live Update interaction tracking event. Reads the extras placed on
      * [intent] by [addPushTrackingDetails] and fires a tap / action-button / dismiss event
      * to Edge. No-op when the intent carries no Live Update tracking extras.
