@@ -55,7 +55,7 @@
             auto-service for FCM events.
         -->
         <service
-            android:name="com.adobe.marketing.mobile.messaging.MessagingService"
+            android:name=".SamplePushService"
             android:enabled="true"
             android:exported="false">
             <intent-filter>

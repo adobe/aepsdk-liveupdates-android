@@ -10,22 +10,22 @@
 # governing permissions and limitations under the License.
 #
 
-name: Build and Test
+name: Publish Snapshot
 
 on:
-  pull_request:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git reference (branch, tag, or SHA) to check out when publishing the snapshot. Defaults to 'staging'."
+        required: false
+        default: 'staging'
 
 jobs:
-  build-and-test:
-    name: "CI"
-    uses: adobe/aepsdk-commons/.github/workflows/android-build-and-test.yml@gha-android-3.4.4
-    with:
-      android-api-levels: '[29]'
-      run-test-unit: true
-      # No functional (androidTest) suite exists in this module yet; enable when one is added.
-      run-test-functional: false
-      run-build-app: true
-      enable-codecov: true
-      # 100% Kotlin module -> Dokka's javadoc output path.
-      javadoc-build-path: code/liveupdates/build/dokka/javadoc
+  publish:
+    permissions:
+        contents: write
+    uses: adobe/aepsdk-commons/.github/workflows/android-maven-snapshot.yml@gha-android-3.4.4
     secrets: inherit
+    with:
+      ref: ${{ inputs.ref }}
+      staging-dir: code/liveupdates/build/staging-deploy

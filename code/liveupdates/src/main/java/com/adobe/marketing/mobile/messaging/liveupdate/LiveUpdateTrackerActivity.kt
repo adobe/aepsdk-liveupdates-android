@@ -18,7 +18,7 @@ import android.os.Bundle
 /**
  * Transparent, single-instance activity that intercepts a Live Update chip tap so tracking
  * fires and the app's `onClick` listener is invoked. Not intended to be invoked directly by
- * application code - the SDK's [LiveUpdateHandlerImpl] targets it from the chip's content
+ * application code - the SDK's [LiveUpdatePlugin] targets it from the chip's content
  * PendingIntent.
  *
  * Behaviour:

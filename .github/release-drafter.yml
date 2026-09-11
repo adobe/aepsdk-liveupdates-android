@@ -10,22 +10,7 @@
 # governing permissions and limitations under the License.
 #
 
-name: Build and Test
+template: |
+  ## What’s Changed
 
-on:
-  pull_request:
-
-jobs:
-  build-and-test:
-    name: "CI"
-    uses: adobe/aepsdk-commons/.github/workflows/android-build-and-test.yml@gha-android-3.4.4
-    with:
-      android-api-levels: '[29]'
-      run-test-unit: true
-      # No functional (androidTest) suite exists in this module yet; enable when one is added.
-      run-test-functional: false
-      run-build-app: true
-      enable-codecov: true
-      # 100% Kotlin module -> Dokka's javadoc output path.
-      javadoc-build-path: code/liveupdates/build/dokka/javadoc
-    secrets: inherit
+  $CHANGES

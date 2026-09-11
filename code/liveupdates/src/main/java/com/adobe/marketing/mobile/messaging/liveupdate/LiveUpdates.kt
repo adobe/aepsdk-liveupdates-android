@@ -16,8 +16,8 @@ import android.content.Intent
 import com.adobe.marketing.mobile.Event
 import com.adobe.marketing.mobile.EventSource
 import com.adobe.marketing.mobile.EventType
-import com.adobe.marketing.mobile.Messaging
 import com.adobe.marketing.mobile.MobileCore
+import com.adobe.marketing.mobile.plugin.ILiveupdatePlugin
 import com.adobe.marketing.mobile.services.Log
 import com.google.firebase.messaging.RemoteMessage
 import org.json.JSONException
@@ -41,7 +41,7 @@ import org.json.JSONObject
  * own [com.google.firebase.messaging.FirebaseMessagingService] call
  * `MessagingService.handleRemoteMessage(context, message)` directly - that method already
  * detects Live Updates by the `adb_liveupdate_data` key and dispatches to the registered
- * [com.adobe.marketing.mobile.ILiveUpdateHandler].
+ * [com.adobe.marketing.mobile.plugin.ILiveupdatePlugin].
  */
 object LiveUpdates {
 
@@ -247,23 +247,23 @@ object LiveUpdates {
      * [LiveUpdatePayload.EVENT_TYPE_LOCAL_START] to mark the initial locally-raised chip so
      * server-side reporting can distinguish it from an FCM `start`.
      *
-     * @return `true` if the SDK's canonical [LiveUpdateHandlerImpl] was registered via
-     *   [Messaging.setLiveUpdateHandler] and rendering ran; `false` if the registered
-     *   handler is a custom implementation the SDK cannot invoke directly (in that case
+     * @return `true` if the SDK's canonical [LiveUpdatePlugin] was registered via
+     *   [MobileCore.addPlugins] and rendering ran; `false` if the registered
+     *   plugin is a custom implementation the SDK cannot invoke directly (in that case
      *   the host app should render the notification itself and call [trackLiveUpdateEvent]).
      */
     @JvmStatic
     fun triggerLocalLiveUpdate(context: Context, payload: LiveUpdatePayload): Boolean {
-        val handler = Messaging.getLiveUpdateHandler()
-        if (handler !is LiveUpdateHandlerImpl) {
+        val plugin = MobileCore.getPlugin(ILiveupdatePlugin::class.java)
+        if (plugin !is LiveUpdatePlugin) {
             Log.warning(
                 LiveUpdatesConstants.LOG_TAG, SELF_TAG,
-                "triggerLocalLiveUpdate requires the canonical LiveUpdateHandlerImpl to be " +
-                    "registered via Messaging.setLiveUpdateHandler(...). Skipping."
+                "triggerLocalLiveUpdate requires the canonical LiveUpdatePlugin to be " +
+                    "registered via MobileCore.addPlugins(...). Skipping."
             )
             return false
         }
-        handler.postLiveUpdate(context, payload)
+        plugin.postLiveUpdate(context, payload)
         return true
     }
 
@@ -470,7 +470,7 @@ object LiveUpdates {
         )
     }
 
-    // ---------- internal helpers (visible to LiveUpdateHandlerImpl) ----------
+    // ---------- internal helpers (visible to LiveUpdatePlugin) ----------
 
     /**
      * Dispatches an Edge event carrying the Live Update lifecycle tracking payload. The XDM
@@ -773,7 +773,7 @@ object LiveUpdates {
 
     /**
      * Re-hydrates the full [LiveUpdatePayload] from the extras on a dismiss [intent] (set via
-     * [LiveUpdateHandlerImpl] at post time) and invokes [ILiveUpdateListener.onDismissed].
+     * [LiveUpdatePlugin] at post time) and invokes [ILiveUpdateListener.onDismissed].
      * No-op if no listener is registered or the payload extra is missing / unparseable.
      * Called from [LiveUpdateInteractionReceiver] after dismiss tracking is dispatched.
      */
@@ -807,7 +807,7 @@ object LiveUpdates {
 
     /**
      * Re-hydrates the full [LiveUpdatePayload] from the extras on a chip-tap [intent] (set via
-     * [LiveUpdateHandlerImpl] at post time) and invokes [ILiveUpdateListener.onClick].
+     * [LiveUpdatePlugin] at post time) and invokes [ILiveUpdateListener.onClick].
      * No-op if no listener is registered or the payload extra is missing / unparseable.
      * Called from [LiveUpdateTrackerActivity] for a chip body tap after tap tracking is dispatched.
      */

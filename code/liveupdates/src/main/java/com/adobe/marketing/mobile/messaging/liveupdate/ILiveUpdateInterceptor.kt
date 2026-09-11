@@ -26,7 +26,7 @@ package com.adobe.marketing.mobile.messaging.liveupdate
  * SDK proceeds as normal (equivalent to always returning `true`).
  *
  * **Scope**: honored on the SDK-rendered receive paths (auto and mixed integration, via
- * [LiveUpdateHandlerImpl]). It does not gate app-owned full-manual rendering, where the app
+ * [LiveUpdatePlugin]). It does not gate app-owned full-manual rendering, where the app
  * already controls whether to display.
  *
  * **Threading**: called on whatever thread the SDK is processing the push on - typically the
