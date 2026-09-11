@@ -200,11 +200,9 @@ class LiveUpdatesTest {
 
     @Test
     fun `triggerLocalLiveUpdate returns false when no plugin registered`() {
-        mockStatic(MobileCore::class.java).use { coreMock ->
-            coreMock.`when`<ILiveupdatePlugin?> { MobileCore.getPlugin(ILiveupdatePlugin::class.java) }
-                .thenReturn(null)
-            assertFalse(LiveUpdates.triggerLocalLiveUpdate(mock(Context::class.java), payload()))
-        }
+        mobileCoreMock.`when`<ILiveupdatePlugin?> { MobileCore.getPlugin(ILiveupdatePlugin::class.java) }
+            .thenReturn(null)
+        assertFalse(LiveUpdates.triggerLocalLiveUpdate(mock(Context::class.java), payload()))
     }
 
     @Test
@@ -212,11 +210,9 @@ class LiveUpdatesTest {
         val customPlugin = object : ILiveupdatePlugin {
             override fun handleLiveUpdatePush(context: Context, message: Any) {}
         }
-        mockStatic(MobileCore::class.java).use { coreMock ->
-            coreMock.`when`<ILiveupdatePlugin?> { MobileCore.getPlugin(ILiveupdatePlugin::class.java) }
-                .thenReturn(customPlugin)
-            assertFalse(LiveUpdates.triggerLocalLiveUpdate(mock(Context::class.java), payload()))
-        }
+        mobileCoreMock.`when`<ILiveupdatePlugin?> { MobileCore.getPlugin(ILiveupdatePlugin::class.java) }
+            .thenReturn(customPlugin)
+        assertFalse(LiveUpdates.triggerLocalLiveUpdate(mock(Context::class.java), payload()))
     }
 
     @Test
@@ -224,13 +220,11 @@ class LiveUpdatesTest {
         val pluginImpl = mock(LiveUpdatePlugin::class.java)
         val context = mock(Context::class.java)
         val p = payload()
-        mockStatic(MobileCore::class.java).use { coreMock ->
-            coreMock.`when`<ILiveupdatePlugin?> { MobileCore.getPlugin(ILiveupdatePlugin::class.java) }
-                .thenReturn(pluginImpl)
-            val result = LiveUpdates.triggerLocalLiveUpdate(context, p)
-            assertTrue(result)
-            verify(pluginImpl).postLiveUpdate(context, p)
-        }
+        mobileCoreMock.`when`<ILiveupdatePlugin?> { MobileCore.getPlugin(ILiveupdatePlugin::class.java) }
+            .thenReturn(pluginImpl)
+        val result = LiveUpdates.triggerLocalLiveUpdate(context, p)
+        assertTrue(result)
+        verify(pluginImpl).postLiveUpdate(context, p)
     }
 
     // =====================================================================
