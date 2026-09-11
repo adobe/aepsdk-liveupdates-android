@@ -30,6 +30,10 @@ import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdates
 import com.google.firebase.messaging.FirebaseMessaging
 
 class LiveUpdatesApplication : Application() {
+    private val ENVIRONMENT_FILE_ID = "3149c49c3910/4f6b2fbf2986/launch-7d78a5fd1de3-development"
+    private val STAGING_APP_ID = "staging/1b50a869c4a2/72557653d422/launch-51bcfc552b32" // CJM STAGE VA7
+
+    private val STAGING = true
 
     override fun onCreate() {
         super.onCreate()
@@ -48,7 +52,14 @@ class LiveUpdatesApplication : Application() {
             Assurance.EXTENSION
         )
         MobileCore.registerExtensions(extensions) {
-            MobileCore.configureWithAppID("staging/1b50a869c4a2/72557653d422/launch-51bcfc552b32") //CJM STAGE VA7
+            if (STAGING) {
+                MobileCore.configureWithAppID(STAGING_APP_ID)
+                MobileCore.updateConfiguration(
+                    hashMapOf("edge.environment" to "int") as Map<String, Any>
+                )
+            } else {
+                MobileCore.configureWithAppID(ENVIRONMENT_FILE_ID)
+            }
             MobileCore.lifecycleStart(null)
 
             // Primary identity demonstration. AJO uses this to correlate server-side
@@ -56,14 +67,14 @@ class LiveUpdatesApplication : Application() {
             // identifier your app authenticates the user with.
             val identityMap = IdentityMap().apply {
                 addItem(
-                    IdentityItem("user@example.com", AuthenticatedState.AUTHENTICATED, true),
+                    IdentityItem("cuc_liveupdate@adobe.com", AuthenticatedState.AUTHENTICATED, true),
                     "Email"
                 )
             }
             Identity.updateIdentities(identityMap)
         }
         MobileCore.addPlugins(LiveUpdatePlugin(SampleLiveUpdateStyleProvider(applicationContext)))
-        Assurance.startSession("liveupdatesampleapp://?adb_validation_sessionid=061c656f-4801-4e0b-8939-d8f862e5f058&env=qa")
+        //Assurance.startSession("liveupdatesampleapp://?adb_validation_sessionid=061c656f-4801-4e0b-8939-d8f862e5f058&env=qa")
         val dismissedStore = DismissedLiveUpdateStore(applicationContext)
         LiveUpdates.setLiveUpdateInterceptor(
             SampleLiveUpdateInterceptor(applicationContext, dismissedStore)
