@@ -47,7 +47,7 @@ import org.json.JSONObject
 object LiveUpdates {
 
     private const val SELF_TAG = "LiveUpdates"
-    private const val EXTENSION_VERSION = "1.0.0"
+    private const val VERSION = "1.0.0"
 
     // Event dispatch constants.
     private const val EVENT_NAME_LIVE_UPDATE_TRACKING = "Live Update Event Tracking"
@@ -152,7 +152,7 @@ object LiveUpdates {
 
     /** Returns the SDK version string. */
     @JvmStatic
-    fun extensionVersion(): String = EXTENSION_VERSION
+    fun extensionVersion(): String = VERSION
 
     // ---------- Listener registration ----------
 
