@@ -21,7 +21,6 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.adobe.marketing.mobile.MobileCore
-import com.adobe.marketing.mobile.messaging.MessagingConstants
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload.Companion.EVENT_TYPE_END
 import com.adobe.marketing.mobile.plugin.ILiveupdatePlugin
 import com.adobe.marketing.mobile.services.Log
@@ -70,7 +69,7 @@ class LiveUpdatePlugin(
 
         // Log the raw envelope up front so any payload/parsing issue is diagnosable from logs
         // even when parse() returns null without surfacing the specific failing field.
-        val rawEnvelope = remoteMessage.data[MessagingConstants.Push.PayloadKeys.LIVE_UPDATE_DATA]
+        val rawEnvelope = remoteMessage.data[LiveUpdatesConstants.LIVE_UPDATE_DATA_KEY]
         Log.debug(
             LiveUpdatesConstants.LOG_TAG,
             TAG,
