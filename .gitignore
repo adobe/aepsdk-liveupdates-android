@@ -101,3 +101,4 @@ fcm*.sh
 demo-curl.sh
 *.postman_collection.json
 *.postman_environment.json
+.scout/
