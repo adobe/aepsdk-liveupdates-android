@@ -35,6 +35,10 @@ class LiveUpdatesApplication : Application() {
     private val ENVIRONMENT_FILE_ID = ""
     private val STAGING_APP_ID = ""
 
+    // Fill in with your own Assurance session URL (from Assurance > Create Session) to
+    // debug this sample app with Assurance.
+    private val ASSURANCE_SESSION_URL = ""
+
     private val STAGING = true
 
     override fun onCreate() {
@@ -76,7 +80,7 @@ class LiveUpdatesApplication : Application() {
             Identity.updateIdentities(identityMap)
         }
         MobileCore.addPlugins(LiveUpdatePlugin(SampleLiveUpdateStyleProvider(applicationContext)))
-        //Assurance.startSession("liveupdatesampleapp://?adb_validation_sessionid=061c656f-4801-4e0b-8939-d8f862e5f058&env=qa")
+        // Assurance.startSession(ASSURANCE_SESSION_URL)
         val dismissedStore = DismissedLiveUpdateStore(applicationContext)
         LiveUpdates.setLiveUpdateInterceptor(
             SampleLiveUpdateInterceptor(applicationContext, dismissedStore)
