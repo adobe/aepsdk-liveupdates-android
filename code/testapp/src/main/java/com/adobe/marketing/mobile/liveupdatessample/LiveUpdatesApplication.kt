@@ -30,8 +30,10 @@ import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdates
 import com.google.firebase.messaging.FirebaseMessaging
 
 class LiveUpdatesApplication : Application() {
-    private val ENVIRONMENT_FILE_ID = "3149c49c3910/4f6b2fbf2986/launch-7d78a5fd1de3-development"
-    private val STAGING_APP_ID = "staging/1b50a869c4a2/72557653d422/launch-51bcfc552b32" // CJM STAGE VA7
+    // Fill these in with your own Data Collection (Tags) mobile property's environment file
+    // IDs before running this sample app - see Data Collection UI > your property > Environments.
+    private val ENVIRONMENT_FILE_ID = ""
+    private val STAGING_APP_ID = ""
 
     private val STAGING = true
 
