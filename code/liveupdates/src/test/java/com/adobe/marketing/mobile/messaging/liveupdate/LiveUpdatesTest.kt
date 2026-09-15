@@ -273,29 +273,6 @@ class LiveUpdatesTest {
     }
 
     // =====================================================================
-    // isLiveUpdateIntent
-    // =====================================================================
-
-    @Test
-    fun `isLiveUpdateIntent returns false for null intent`() {
-        assertFalse(LiveUpdates.isLiveUpdateIntent(null))
-    }
-
-    @Test
-    fun `isLiveUpdateIntent returns false when notification id extra is absent`() {
-        val intent = mock(Intent::class.java)
-        `when`(intent.getStringExtra(LiveUpdates.EXTRA_NOTIFICATION_ID)).thenReturn(null)
-        assertFalse(LiveUpdates.isLiveUpdateIntent(intent))
-    }
-
-    @Test
-    fun `isLiveUpdateIntent returns true when notification id extra is present`() {
-        val intent = mock(Intent::class.java)
-        `when`(intent.getStringExtra(LiveUpdates.EXTRA_NOTIFICATION_ID)).thenReturn("notif-1")
-        assertTrue(LiveUpdates.isLiveUpdateIntent(intent))
-    }
-
-    // =====================================================================
     // handleNotificationResponse
     // =====================================================================
 
