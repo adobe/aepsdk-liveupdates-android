@@ -295,6 +295,13 @@ class LiveUpdatesTest {
         assertTrue(LiveUpdates.isLiveUpdateIntent(intent))
     }
 
+    @Test
+    fun `isLiveUpdateIntent returns false when notification id extra is empty`() {
+        val intent = mock(Intent::class.java)
+        `when`(intent.getStringExtra(LiveUpdates.EXTRA_NOTIFICATION_ID)).thenReturn("")
+        assertFalse(LiveUpdates.isLiveUpdateIntent(intent))
+    }
+
     // =====================================================================
     // handleNotificationResponse
     // =====================================================================
@@ -363,6 +370,17 @@ class LiveUpdatesTest {
         mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
     }
 
+    @Test
+    fun `handleNotificationResponse returns true but skips dispatch when neither applicationOpened nor customActionId set`() {
+        val intent = mock(Intent::class.java)
+        `when`(intent.getStringExtra(LiveUpdates.EXTRA_NOTIFICATION_ID)).thenReturn("id1")
+
+        val result = LiveUpdates.handleNotificationResponse(intent, false)
+
+        assertTrue(result)
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
+    }
+
     // =====================================================================
     // Topic subscription tracking
     // =====================================================================
@@ -426,6 +444,12 @@ class LiveUpdatesTest {
     @Test
     fun `dispatchTopicTracking skips dispatch when topic is empty`() {
         LiveUpdates.trackTopicSubscribed("")
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
+    }
+
+    @Test
+    fun `dispatchTopicTracking skips dispatch when topic is empty for unsubscribed`() {
+        LiveUpdates.trackTopicUnsubscribed("")
         mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
     }
 
