@@ -37,7 +37,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -75,6 +83,7 @@ import kotlin.coroutines.resume
  * be reused or replaced; it is never written to storage and is discarded when the screen is
  * left.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TopicsScreen(fcmToken: String?, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -99,33 +108,43 @@ fun TopicsScreen(fcmToken: String?, onBack: () -> Unit) {
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("FCM Topics") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back"
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            )
+        }
+    ) { innerPadding ->
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Top
+                .padding(innerPadding)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Start
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Top
             ) {
-                TextButton(onClick = onBack) {
-                    Text("← Back")
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "FCM Topic Subscriptions",
-                style = MaterialTheme.typography.headlineSmall
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "Firebase's client SDK does not expose subscribed topics. Tap 'Refresh list' and paste an OAuth2 access token to fetch them via the Instance ID REST API.",
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center
-            )
+                Text(
+                    text = "Firebase's client SDK does not expose subscribed topics. Tap 'Refresh list' and paste an OAuth2 access token to fetch them via the Instance ID REST API.",
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center
+                )
             Spacer(modifier = Modifier.height(24.dp))
 
             OutlinedTextField(
@@ -270,6 +289,7 @@ fun TopicsScreen(fcmToken: String?, onBack: () -> Unit) {
                     Text(current.message)
                 }
             }
+        }
         }
     }
 

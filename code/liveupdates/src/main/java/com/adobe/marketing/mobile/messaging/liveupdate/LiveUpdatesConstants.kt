@@ -13,4 +13,9 @@ package com.adobe.marketing.mobile.messaging.liveupdate
 
 internal object LiveUpdatesConstants {
     const val LOG_TAG = "LiveUpdates"
+
+    // Wire key for the Live Update envelope in the FCM data payload. Mirrors
+    // MessagingConstants.Push.PayloadKeys.LIVE_UPDATE_DATA in aepsdk-messaging-android -
+    // duplicated here so this SDK does not need a compile-time dependency on Messaging.
+    const val LIVE_UPDATE_DATA_KEY = "adb_liveupdate_data"
 }

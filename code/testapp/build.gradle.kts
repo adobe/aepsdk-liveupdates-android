@@ -49,13 +49,16 @@ android {
 
 val mavenCoreVersion: String by project
 val mavenEdgeVersion: String by project
+val mavenMessagingVersion: String by project
 
 dependencies {
     // New Live Updates SDK under construction
     implementation(project(":liveupdates"))
 
     implementation("com.adobe.marketing.mobile:core:$mavenCoreVersion")
-    implementation("com.github.adobe:aepsdk-messaging-android:rc-liveupdates-SNAPSHOT")
+    // Messaging is consumed via JitPack, pinned to the rc-liveupdates branch of
+    // aepsdk-messaging-android, until that branch is released.
+    implementation("com.github.adobe:aepsdk-messaging-android:$mavenMessagingVersion")
     implementation("com.adobe.marketing.mobile:edge:$mavenEdgeVersion")
     implementation("com.adobe.marketing.mobile:lifecycle:3.0.2")
     implementation("com.adobe.marketing.mobile:edgeidentity:3.0.1")
@@ -69,6 +72,7 @@ dependencies {
     implementation("androidx.activity:activity-compose")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

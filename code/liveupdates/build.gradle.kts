@@ -17,7 +17,6 @@ plugins {
 
 val mavenCoreVersion: String by project
 val mavenEdgeVersion: String by project
-val mavenMessagingVersion: String by project
 
 aepLibrary {
     namespace = "com.adobe.marketing.mobile.messaging.liveupdate"
@@ -31,7 +30,6 @@ aepLibrary {
         gitRepoName = "aepsdk-liveupdates-android"
         addCoreDependency(mavenCoreVersion)
         addEdgeDependency(mavenEdgeVersion)
-        addMavenDependency("com.adobe.marketing.mobile", "messaging", mavenMessagingVersion)
     }
 }
 
@@ -41,10 +39,6 @@ dependencies {
     implementation(BuildConstants.Dependencies.ANDROIDX_CORE_KTX)
 
     implementation("com.adobe.marketing.mobile:core:$mavenCoreVersion")
-
-    // Messaging — required for ILiveUpdateHandler interface, Messaging.setLiveUpdateHandler,
-    // MessagingConstants.
-    implementation("com.github.adobe:aepsdk-messaging-android:rc-liveupdates-SNAPSHOT")
 
     // Edge Network for Live Update lifecycle telemetry
     implementation("com.adobe.marketing.mobile:edge:$mavenEdgeVersion")

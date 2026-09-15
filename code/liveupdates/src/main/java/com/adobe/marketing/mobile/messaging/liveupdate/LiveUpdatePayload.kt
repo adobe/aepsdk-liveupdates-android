@@ -11,7 +11,6 @@
 
 package com.adobe.marketing.mobile.messaging.liveupdate
 
-import com.adobe.marketing.mobile.messaging.MessagingConstants
 import com.adobe.marketing.mobile.services.Log
 import com.google.firebase.messaging.RemoteMessage
 import org.json.JSONException
@@ -168,7 +167,7 @@ class LiveUpdatePayload private constructor(
         /** Fast detection - does this [message] carry the Live Update envelope key? */
         @JvmStatic
         fun isLiveUpdate(message: RemoteMessage): Boolean =
-            message.data.containsKey(MessagingConstants.Push.PayloadKeys.LIVE_UPDATE_DATA)
+            message.data.containsKey(LiveUpdatesConstants.LIVE_UPDATE_DATA_KEY)
 
         /**
          * Parses [message] into a [LiveUpdatePayload]. Returns `null` when the envelope is
@@ -177,7 +176,7 @@ class LiveUpdatePayload private constructor(
          */
         @JvmStatic
         fun parse(message: RemoteMessage): LiveUpdatePayload? {
-            val envelopeJson = message.data[MessagingConstants.Push.PayloadKeys.LIVE_UPDATE_DATA]
+            val envelopeJson = message.data[LiveUpdatesConstants.LIVE_UPDATE_DATA_KEY]
             if (envelopeJson.isNullOrEmpty()) {
                 return null
             }

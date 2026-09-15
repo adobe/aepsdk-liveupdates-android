@@ -10,21 +10,36 @@
 # governing permissions and limitations under the License.
 #
 
-org.gradle.jvmargs=-Xmx2048m
-org.gradle.caching=true
+codecov:
+  notify:
+    require_ci_to_pass: yes
 
-android.useAndroidX=true
+coverage:
+  precision: 2
+  round: nearest
+  range: "40...90"
 
-moduleName=liveupdates
-moduleVersion=1.0.0
+  status:
+    project:
+      default:
+        target: 75%
+        threshold: 5%
+    patch:
+      default:
+        target: 75%
+        threshold: 5%
+    changes: no
 
-#Maven artifact
-mavenRepoName=AdobeMobileLiveUpdatesSdk
-mavenRepoDescription=Adobe Experience Platform Live Updates extension for the Adobe Experience Platform Mobile SDK
-mavenUploadDryRunFlag=false
+parsers:
+  gcov:
+    branch_detection:
+      conditional: yes
+      loop: yes
+      method: no
+      macro: no
 
-mavenCoreVersion=3.8.1-SNAPSHOT
-mavenEdgeVersion=3.0.1
-# JitPack branch-snapshot coordinate for the testapp's Messaging dependency (rc-liveupdates
-# branch of aepsdk-messaging-android). Not used by the liveupdates SDK itself.
-mavenMessagingVersion=rc-liveupdates-SNAPSHOT
+comment:
+  layout: "header, diff, flags, files"
+  behavior: default
+  require_changes: no
+  require_base: no

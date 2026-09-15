@@ -18,7 +18,7 @@ import androidx.core.app.NotificationCompat
  * apply to this push — `ProgressStyle` on API 36+, `MetricStyle` on API 37+, or any future
  * promotion-eligible style.
  *
- * Returning `null` causes [LiveUpdateHandlerImpl] to drop the push with a warning log; the
+ * Returning `null` causes [LiveUpdatePlugin] to drop the push with a warning log; the
  * SDK does not fall back to any default style.
  *
  * Design split: the envelope root carries SDK-canonical fields (parsed into typed properties

@@ -14,9 +14,8 @@ package com.adobe.marketing.mobile.messaging.liveupdate
 import android.content.Context
 import android.content.Intent
 import com.adobe.marketing.mobile.Event
-import com.adobe.marketing.mobile.ILiveUpdateHandler
-import com.adobe.marketing.mobile.Messaging
 import com.adobe.marketing.mobile.MobileCore
+import com.adobe.marketing.mobile.plugin.ILiveupdatePlugin
 import com.google.firebase.messaging.RemoteMessage
 import org.json.JSONArray
 import org.json.JSONObject
@@ -200,38 +199,32 @@ class LiveUpdatesTest {
     // =====================================================================
 
     @Test
-    fun `triggerLocalLiveUpdate returns false when no handler registered`() {
-        mockStatic(Messaging::class.java).use { messagingMock ->
-            messagingMock.`when`<ILiveUpdateHandler?> { Messaging.getLiveUpdateHandler() }
-                .thenReturn(null)
-            assertFalse(LiveUpdates.triggerLocalLiveUpdate(mock(Context::class.java), payload()))
-        }
+    fun `triggerLocalLiveUpdate returns false when no plugin registered`() {
+        mobileCoreMock.`when`<ILiveupdatePlugin?> { MobileCore.getPlugin(ILiveupdatePlugin::class.java) }
+            .thenReturn(null)
+        assertFalse(LiveUpdates.triggerLocalLiveUpdate(mock(Context::class.java), payload()))
     }
 
     @Test
-    fun `triggerLocalLiveUpdate returns false for a custom non-canonical handler`() {
-        val customHandler = object : ILiveUpdateHandler {
-            override fun handleLiveUpdatePush(context: Context, message: RemoteMessage) {}
+    fun `triggerLocalLiveUpdate returns false for a custom non-canonical plugin`() {
+        val customPlugin = object : ILiveupdatePlugin {
+            override fun handleLiveUpdatePush(context: Context, message: Any) {}
         }
-        mockStatic(Messaging::class.java).use { messagingMock ->
-            messagingMock.`when`<ILiveUpdateHandler?> { Messaging.getLiveUpdateHandler() }
-                .thenReturn(customHandler)
-            assertFalse(LiveUpdates.triggerLocalLiveUpdate(mock(Context::class.java), payload()))
-        }
+        mobileCoreMock.`when`<ILiveupdatePlugin?> { MobileCore.getPlugin(ILiveupdatePlugin::class.java) }
+            .thenReturn(customPlugin)
+        assertFalse(LiveUpdates.triggerLocalLiveUpdate(mock(Context::class.java), payload()))
     }
 
     @Test
-    fun `triggerLocalLiveUpdate delegates to postLiveUpdate and returns true for canonical handler`() {
-        val handlerImpl = mock(LiveUpdateHandlerImpl::class.java)
+    fun `triggerLocalLiveUpdate delegates to postLiveUpdate and returns true for canonical plugin`() {
+        val pluginImpl = mock(LiveUpdatePlugin::class.java)
         val context = mock(Context::class.java)
         val p = payload()
-        mockStatic(Messaging::class.java).use { messagingMock ->
-            messagingMock.`when`<ILiveUpdateHandler?> { Messaging.getLiveUpdateHandler() }
-                .thenReturn(handlerImpl)
-            val result = LiveUpdates.triggerLocalLiveUpdate(context, p)
-            assertTrue(result)
-            verify(handlerImpl).postLiveUpdate(context, p)
-        }
+        mobileCoreMock.`when`<ILiveupdatePlugin?> { MobileCore.getPlugin(ILiveupdatePlugin::class.java) }
+            .thenReturn(pluginImpl)
+        val result = LiveUpdates.triggerLocalLiveUpdate(context, p)
+        assertTrue(result)
+        verify(pluginImpl).postLiveUpdate(context, p)
     }
 
     // =====================================================================

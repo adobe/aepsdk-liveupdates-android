@@ -24,12 +24,22 @@ import com.adobe.marketing.mobile.edge.identity.Identity
 import com.adobe.marketing.mobile.edge.identity.IdentityItem
 import com.adobe.marketing.mobile.edge.identity.IdentityMap
 import com.adobe.marketing.mobile.messaging.liveupdate.ILiveUpdateListener
-import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdateHandlerImpl
+import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePlugin
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdates
 import com.google.firebase.messaging.FirebaseMessaging
 
 class LiveUpdatesApplication : Application() {
+    // Fill these in with your own Data Collection (Tags) mobile property's environment file
+    // IDs before running this sample app - see Data Collection UI > your property > Environments.
+    private val ENVIRONMENT_FILE_ID = ""
+    private val STAGING_APP_ID = ""
+
+    // Fill in with your own Assurance session URL (from Assurance > Create Session) to
+    // debug this sample app with Assurance.
+    private val ASSURANCE_SESSION_URL = ""
+
+    private val STAGING = true
 
     override fun onCreate() {
         super.onCreate()
@@ -48,10 +58,14 @@ class LiveUpdatesApplication : Application() {
             Assurance.EXTENSION
         )
         MobileCore.registerExtensions(extensions) {
-            // TODO: replace the placeholder below with the environment file id from your Adobe
-            // Data Collection (Launch) property before running the sample against real
-            // infrastructure. Without a valid id, events will not reach Adobe services.
-            MobileCore.configureWithAppID("<YOUR_ENVIRONMENT_FILE_ID>")
+            if (STAGING) {
+                MobileCore.configureWithAppID(STAGING_APP_ID)
+                MobileCore.updateConfiguration(
+                    hashMapOf("edge.environment" to "int") as Map<String, Any>
+                )
+            } else {
+                MobileCore.configureWithAppID(ENVIRONMENT_FILE_ID)
+            }
             MobileCore.lifecycleStart(null)
 
             // Primary identity demonstration. AJO uses this to correlate server-side
@@ -59,25 +73,19 @@ class LiveUpdatesApplication : Application() {
             // identifier your app authenticates the user with.
             val identityMap = IdentityMap().apply {
                 addItem(
-                    IdentityItem("user@example.com", AuthenticatedState.AUTHENTICATED, true),
+                    IdentityItem("cuc_liveupdate@adobe.com", AuthenticatedState.AUTHENTICATED, true),
                     "Email"
                 )
             }
             Identity.updateIdentities(identityMap)
         }
-
-        // Auto-mode integration: register a LiveUpdateHandlerImpl with the app's
-        // ILiveUpdateStyleProvider. The SDK takes over rendering on every incoming push
-        // whose data map carries `adb_liveupdate_data`.
-        Messaging.setLiveUpdateHandler(LiveUpdateHandlerImpl(SampleLiveUpdateStyleProvider(applicationContext)))
-
-        // Interceptor demo: suppress Live Updates the user already dismissed. The store records
-        // dismissed ids (see onDismissed below); the interceptor vetoes any incoming Live Update
-        // whose id is in that set. Gated by SampleLiveUpdateInterceptor.DISCARD_DISMISSED_UPDATES.
+        MobileCore.addPlugins(LiveUpdatePlugin(SampleLiveUpdateStyleProvider(applicationContext)))
+        // Assurance.startSession(ASSURANCE_SESSION_URL)
         val dismissedStore = DismissedLiveUpdateStore(applicationContext)
         LiveUpdates.setLiveUpdateInterceptor(
             SampleLiveUpdateInterceptor(applicationContext, dismissedStore)
         )
+        MobileCore.trackAction("Init", null)
 
         // Optional: react to Live Update lifecycle events from the app side. The generic
         // onLiveUpdateReceived fires for every push; onStart / onUpdate / onEnd fire next
