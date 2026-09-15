@@ -41,7 +41,6 @@ import org.mockito.Mockito.`when`
 
 class LiveUpdatesTest {
 
-
     private lateinit var mobileCoreMock: MockedStatic<MobileCore>
 
     @Before
