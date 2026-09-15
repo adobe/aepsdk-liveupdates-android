@@ -56,7 +56,9 @@ dependencies {
     implementation(project(":liveupdates"))
 
     implementation("com.adobe.marketing.mobile:core:$mavenCoreVersion")
-    implementation("com.adobe.marketing.mobile:messaging:$mavenMessagingVersion")
+    // Messaging is consumed via JitPack, pinned to the rc-liveupdates branch of
+    // aepsdk-messaging-android, until that branch is released.
+    implementation("com.github.adobe:aepsdk-messaging-android:$mavenMessagingVersion")
     implementation("com.adobe.marketing.mobile:edge:$mavenEdgeVersion")
     implementation("com.adobe.marketing.mobile:lifecycle:3.0.2")
     implementation("com.adobe.marketing.mobile:edgeidentity:3.0.1")
