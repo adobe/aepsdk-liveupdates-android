@@ -295,6 +295,13 @@ class LiveUpdatesTest {
         assertTrue(LiveUpdates.isLiveUpdateIntent(intent))
     }
 
+    @Test
+    fun `isLiveUpdateIntent returns false when notification id extra is empty`() {
+        val intent = mock(Intent::class.java)
+        `when`(intent.getStringExtra(LiveUpdates.EXTRA_NOTIFICATION_ID)).thenReturn("")
+        assertFalse(LiveUpdates.isLiveUpdateIntent(intent))
+    }
+
     // =====================================================================
     // handleNotificationResponse
     // =====================================================================
