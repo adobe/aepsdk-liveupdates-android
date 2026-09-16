@@ -65,7 +65,7 @@ class LiveUpdatesTest {
 
     @Test
     fun `extensionVersion returns the SDK version`() {
-        assertEquals("1.0.0", LiveUpdates.extensionVersion())
+        assertEquals("0.0.1", LiveUpdates.extensionVersion())
     }
 
     // =====================================================================
