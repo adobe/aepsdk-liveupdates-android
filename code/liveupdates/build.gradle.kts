@@ -24,6 +24,7 @@ aepLibrary {
     enableSpotlessPrettierForJava = true
     enableCheckStyle = true
     enableDokkaDoc = true
+    enablePlayConsoleVerification = true
     // compose = false (default) — the SDK has no UI of its own
 
     publishing {
