@@ -30,6 +30,7 @@ import org.json.JSONObject
  *  - `notification_channel_id`
  *  - `event_type`
  *  - `title`
+ *  - `timestamp`
  */
 class LiveUpdatePayload private constructor(
     // SDK-canonical fields (drive NotificationCompat.Builder calls and event tracking)
@@ -37,6 +38,7 @@ class LiveUpdatePayload private constructor(
     val channelId: String,
     val eventType: String,
     val title: String,
+    val timestamp: Long,
     val priority: String?,
     val body: String?,
     val criticalText: String?,
@@ -66,7 +68,7 @@ class LiveUpdatePayload private constructor(
      */
     override fun toString(): String =
         "LiveUpdatePayload(notificationId=$notificationId, eventType=$eventType, " +
-            "channelId=$channelId, title=$title, topicName=$topicName)"
+            "channelId=$channelId, title=$title, timestamp=$timestamp, topicName=$topicName)"
 
     /**
      * Serializes this payload back into the SDK-canonical envelope JSON (the same shape
@@ -81,6 +83,7 @@ class LiveUpdatePayload private constructor(
         obj.put(KEY_CHANNEL_ID, channelId)
         obj.put(KEY_EVENT_TYPE, eventType)
         obj.put(KEY_TITLE, title)
+        obj.put(KEY_TIMESTAMP, timestamp)
         priority?.let { obj.put(KEY_PRIORITY, it) }
         body?.let { obj.put(KEY_BODY, it) }
         criticalText?.let { obj.put(KEY_CRITICAL_TEXT, it) }
@@ -100,6 +103,7 @@ class LiveUpdatePayload private constructor(
         private const val KEY_CHANNEL_ID = "notification_channel_id"
         private const val KEY_EVENT_TYPE = "event_type"
         private const val KEY_TITLE = "title"
+        private const val KEY_TIMESTAMP = "timestamp"
         private const val KEY_PRIORITY = "priority"
         private const val KEY_BODY = "body"
         private const val KEY_CRITICAL_TEXT = "critical_text"
@@ -129,8 +133,8 @@ class LiveUpdatePayload private constructor(
          * intermediate `RemoteMessage`. Primary use case is
          * [LiveUpdates.triggerLocalLiveUpdate], where the host app raises a Live Update
          * chip programmatically. Required inputs match the envelope's required fields
-         * (`notification_id`, `notification_channel_id`, `event_type`, `title`); everything else is
-         * optional and defaults to `null` / absent.
+         * (`notification_id`, `notification_channel_id`, `event_type`, `title`, `timestamp`);
+         * everything else is optional and defaults to `null` / absent.
          */
         @JvmStatic
         @JvmOverloads
@@ -139,6 +143,7 @@ class LiveUpdatePayload private constructor(
             channelId: String,
             eventType: String,
             title: String,
+            timestamp: Long,
             priority: String? = null,
             body: String? = null,
             criticalText: String? = null,
@@ -153,6 +158,7 @@ class LiveUpdatePayload private constructor(
             channelId = channelId,
             eventType = eventType,
             title = title,
+            timestamp = timestamp,
             priority = priority,
             body = body,
             criticalText = criticalText,
@@ -206,6 +212,7 @@ class LiveUpdatePayload private constructor(
             val channelId = obj.requiredString(KEY_CHANNEL_ID) ?: return null
             val eventType = obj.requiredString(KEY_EVENT_TYPE) ?: return null
             val title = obj.requiredString(KEY_TITLE) ?: return null
+            val timestamp = obj.requiredLong(KEY_TIMESTAMP) ?: return null
 
             // Parse the _xdm block as a typed JSONObject. Opaque to the SDK; null when
             // absent or unparseable. Carried through to the tracking dispatch so AJO
@@ -228,6 +235,7 @@ class LiveUpdatePayload private constructor(
                 channelId = channelId,
                 eventType = eventType,
                 title = title,
+                timestamp = timestamp,
                 priority = obj.optString(KEY_PRIORITY).takeIf { it.isNotEmpty() },
                 body = obj.optString(KEY_BODY).takeIf { it.isNotEmpty() },
                 criticalText = obj.optString(KEY_CRITICAL_TEXT).takeIf { it.isNotEmpty() },
@@ -253,6 +261,18 @@ class LiveUpdatePayload private constructor(
                 )
             }
             return value
+        }
+
+        private fun JSONObject.requiredLong(key: String): Long? {
+            if (!has(key)) {
+                Log.debug(
+                    LiveUpdatesConstants.LOG_TAG,
+                    SELF_TAG,
+                    "adb_liveupdate_data missing required field '$key'"
+                )
+                return null
+            }
+            return optLong(key)
         }
     }
 }

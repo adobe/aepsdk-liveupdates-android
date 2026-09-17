@@ -105,6 +105,9 @@ class LiveUpdatePlugin(
      * ([LiveUpdates.triggerLocalLiveUpdate]).
      */
     internal fun postLiveUpdate(context: Context, payload: LiveUpdatePayload) {
+        if (!NotificationHistoryManager.recordAndValidate(payload)) {
+            return
+        }
         val style = styleProvider.provideStyle(payload)
         if (style == null) {
             Log.warning(

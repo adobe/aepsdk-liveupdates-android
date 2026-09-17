@@ -121,6 +121,7 @@ class LiveUpdatePayloadTest {
             .put("notification_channel_id", "chan")
             .put("event_type", "start")
             .put("title", "Title")
+            .put("timestamp", 1000L)
         val message = remoteMessageWith(envelope.toString(), null)
         val payload = LiveUpdatePayload.parse(message)
         assertNotNull(payload)
@@ -128,6 +129,7 @@ class LiveUpdatePayloadTest {
         assertEquals("chan", payload.channelId)
         assertEquals("start", payload.eventType)
         assertEquals("Title", payload.title)
+        assertEquals(1000L, payload.timestamp)
         assertNull(payload.priority)
         assertNull(payload.body)
         assertNull(payload.criticalText)
@@ -147,6 +149,7 @@ class LiveUpdatePayloadTest {
             .put("notification_channel_id", "chan")
             .put("event_type", "update")
             .put("title", "Title")
+            .put("timestamp", 2000L)
             .put("priority", "PRIORITY_HIGH")
             .put("body", "Body text")
             .put("critical_text", "Critical!")
@@ -161,6 +164,7 @@ class LiveUpdatePayloadTest {
         val payload = LiveUpdatePayload.parse(message)
         assertNotNull(payload)
         payload!!
+        assertEquals(2000L, payload.timestamp)
         assertEquals("PRIORITY_HIGH", payload.priority)
         assertEquals("Body text", payload.body)
         assertEquals("Critical!", payload.criticalText)
@@ -180,6 +184,7 @@ class LiveUpdatePayloadTest {
             .put("notification_channel_id", "chan")
             .put("event_type", "start")
             .put("title", "Title")
+            .put("timestamp", 1000L)
         val message = remoteMessageWith(envelope.toString(), "{not-valid-json")
         val payload = LiveUpdatePayload.parse(message)
         assertNotNull(payload)
@@ -193,6 +198,7 @@ class LiveUpdatePayloadTest {
             .put("notification_channel_id", "chan")
             .put("event_type", "start")
             .put("title", "Title")
+            .put("timestamp", 1000L)
         val message = remoteMessageWith(envelope.toString(), "")
         val payload = LiveUpdatePayload.parse(message)
         assertNotNull(payload)
@@ -207,12 +213,14 @@ class LiveUpdatePayloadTest {
             notificationId = "id1",
             channelId = "chan",
             eventType = LiveUpdatePayload.EVENT_TYPE_START,
-            title = "Title"
+            title = "Title",
+            timestamp = 1000L
         )
         assertEquals("id1", payload.notificationId)
         assertEquals("chan", payload.channelId)
         assertEquals(LiveUpdatePayload.EVENT_TYPE_START, payload.eventType)
         assertEquals("Title", payload.title)
+        assertEquals(1000L, payload.timestamp)
         assertNull(payload.priority)
         assertNull(payload.body)
         assertNull(payload.xdm)
@@ -227,6 +235,7 @@ class LiveUpdatePayloadTest {
             channelId = "chan2",
             eventType = LiveUpdatePayload.EVENT_TYPE_END,
             title = "Title2",
+            timestamp = 2000L,
             priority = "PRIORITY_MAX",
             body = "Body2",
             criticalText = "Crit2",
@@ -237,6 +246,7 @@ class LiveUpdatePayloadTest {
             smallIcon = "ic_x",
             xdm = xdm
         )
+        assertEquals(2000L, payload.timestamp)
         assertEquals("PRIORITY_MAX", payload.priority)
         assertEquals("Body2", payload.body)
         assertEquals("Crit2", payload.criticalText)
@@ -258,6 +268,7 @@ class LiveUpdatePayloadTest {
             channelId = "chan3",
             eventType = LiveUpdatePayload.EVENT_TYPE_UPDATE,
             title = "Title3",
+            timestamp = 3000L,
             priority = "PRIORITY_LOW",
             body = "Body3",
             criticalText = "Crit3",
@@ -277,6 +288,7 @@ class LiveUpdatePayloadTest {
         assertEquals(original.channelId, rehydrated.channelId)
         assertEquals(original.eventType, rehydrated.eventType)
         assertEquals(original.title, rehydrated.title)
+        assertEquals(original.timestamp, rehydrated.timestamp)
         assertEquals(original.priority, rehydrated.priority)
         assertEquals(original.body, rehydrated.body)
         assertEquals(original.criticalText, rehydrated.criticalText)
@@ -293,7 +305,8 @@ class LiveUpdatePayloadTest {
             notificationId = "id4",
             channelId = "chan4",
             eventType = LiveUpdatePayload.EVENT_TYPE_START,
-            title = "Title4"
+            title = "Title4",
+            timestamp = 4000L
         )
         val envelopeJson = original.toEnvelopeJson()
         val xdmRaw = JSONObject().put("campaignID", "camp1").toString()
@@ -308,9 +321,11 @@ class LiveUpdatePayloadTest {
             notificationId = "id5",
             channelId = "chan5",
             eventType = LiveUpdatePayload.EVENT_TYPE_START,
-            title = "Title5"
+            title = "Title5",
+            timestamp = 5000L
         )
         val json = JSONObject(payload.toEnvelopeJson())
+        assertEquals(5000L, json.optLong("timestamp"))
         assertFalse(json.has("priority"))
         assertFalse(json.has("body"))
         assertFalse(json.has("critical_text"))
