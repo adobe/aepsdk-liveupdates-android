@@ -129,7 +129,8 @@ class LiveUpdatePayloadTest {
         assertEquals("chan", payload.channelId)
         assertEquals("start", payload.eventType)
         assertEquals("Title", payload.title)
-        assertEquals(1000L, payload.timestamp)
+        // envelope carries `timestamp` in epoch seconds; in-memory field is millis
+        assertEquals(1_000_000L, payload.timestamp)
         assertNull(payload.priority)
         assertNull(payload.body)
         assertNull(payload.criticalText)
@@ -164,11 +165,12 @@ class LiveUpdatePayloadTest {
         val payload = LiveUpdatePayload.parse(message)
         assertNotNull(payload)
         payload!!
-        assertEquals(2000L, payload.timestamp)
+        // envelope carries `timestamp`/`when` in epoch seconds; in-memory fields are millis
+        assertEquals(2_000_000L, payload.timestamp)
         assertEquals("PRIORITY_HIGH", payload.priority)
         assertEquals("Body text", payload.body)
         assertEquals("Critical!", payload.criticalText)
-        assertEquals(12345L, payload.whenMillis)
+        assertEquals(12_345_000L, payload.whenMillis)
         assertEquals(60L, payload.dismissAfterSeconds)
         assertEquals(42, payload.contentState?.optInt("custom_key_progress"))
         assertEquals("topic1", payload.topicName)
@@ -272,7 +274,9 @@ class LiveUpdatePayloadTest {
             priority = "PRIORITY_LOW",
             body = "Body3",
             criticalText = "Crit3",
-            whenMillis = 111L,
+            // must be a multiple of 1000: toEnvelopeJson/fromEnvelopeJson round-trip through
+            // epoch seconds, which truncates any sub-second precision
+            whenMillis = 111_000L,
             dismissAfterSeconds = 10L,
             contentState = contentState,
             topicName = "topicY",
@@ -325,7 +329,8 @@ class LiveUpdatePayloadTest {
             timestamp = 5000L
         )
         val json = JSONObject(payload.toEnvelopeJson())
-        assertEquals(5000L, json.optLong("timestamp"))
+        // envelope carries `timestamp` in epoch seconds (in-memory value is millis)
+        assertEquals(5L, json.optLong("timestamp"))
         assertFalse(json.has("priority"))
         assertFalse(json.has("body"))
         assertFalse(json.has("critical_text"))

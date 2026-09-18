@@ -50,8 +50,7 @@ internal object NotificationHistoryManager {
 
         return try {
             dbExecutor.submit<Boolean> {
-                val dao = NotificationHistoryDatabase.getInstance().notificationHistoryDao()
-                val accepted = dao.recordIfNewer(
+                val accepted = NotificationHistoryDatabase.getInstance().recordIfNewer(
                     payload.notificationId,
                     payload.channelId,
                     payload.timestamp,
@@ -62,7 +61,8 @@ internal object NotificationHistoryManager {
                         LiveUpdatesConstants.LOG_TAG,
                         SELF_TAG,
                         "Dropping Live Update id=${payload.notificationId}: timestamp " +
-                            "${payload.timestamp} is older than the last recorded timestamp."
+                            "${payload.timestamp} is not newer than the last recorded timestamp " +
+                            "(older or a duplicate)."
                     )
                     // TODO: fire an XDM error event for this rejection once defined (see JIRA-TODO).
                 }

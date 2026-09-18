@@ -83,11 +83,11 @@ class LiveUpdatePayload private constructor(
         obj.put(KEY_CHANNEL_ID, channelId)
         obj.put(KEY_EVENT_TYPE, eventType)
         obj.put(KEY_TITLE, title)
-        obj.put(KEY_TIMESTAMP, timestamp)
+        obj.put(KEY_TIMESTAMP, timestamp / MILLIS_PER_SECOND)
         priority?.let { obj.put(KEY_PRIORITY, it) }
         body?.let { obj.put(KEY_BODY, it) }
         criticalText?.let { obj.put(KEY_CRITICAL_TEXT, it) }
-        whenMillis?.let { obj.put(KEY_WHEN, it) }
+        whenMillis?.let { obj.put(KEY_WHEN, it / MILLIS_PER_SECOND) }
         dismissAfterSeconds?.let { obj.put(KEY_DISMISS_AFTER, it) }
         contentState?.let { obj.put(KEY_CONTENT_STATE, it) }
         topicName?.let { obj.put(KEY_TOPIC_NAME, it) }
@@ -115,6 +115,12 @@ class LiveUpdatePayload private constructor(
 
         // FCM data map key for the XDM passthrough block.
         private const val DATA_KEY_XDM = "_xdm"
+
+        // The envelope carries `timestamp` and `when` in epoch SECONDS (backend convention);
+        // in-memory fields (`timestamp`, `whenMillis`) are always millis. Converted at the
+        // parse/serialize boundary in fromEnvelopeJson/toEnvelopeJson so the rest of the SDK
+        // never has to think about units.
+        private const val MILLIS_PER_SECOND = 1000L
 
         /** Canonical Live Update event_type values the SDK dispatches tracking + listener callbacks for. */
         const val EVENT_TYPE_START = "start"
@@ -212,7 +218,8 @@ class LiveUpdatePayload private constructor(
             val channelId = obj.requiredString(KEY_CHANNEL_ID) ?: return null
             val eventType = obj.requiredString(KEY_EVENT_TYPE) ?: return null
             val title = obj.requiredString(KEY_TITLE) ?: return null
-            val timestamp = obj.requiredLong(KEY_TIMESTAMP) ?: return null
+            val timestampSeconds = obj.requiredLong(KEY_TIMESTAMP) ?: return null
+            val timestamp = timestampSeconds * MILLIS_PER_SECOND
 
             // Parse the _xdm block as a typed JSONObject. Opaque to the SDK; null when
             // absent or unparseable. Carried through to the tracking dispatch so AJO
@@ -239,7 +246,7 @@ class LiveUpdatePayload private constructor(
                 priority = obj.optString(KEY_PRIORITY).takeIf { it.isNotEmpty() },
                 body = obj.optString(KEY_BODY).takeIf { it.isNotEmpty() },
                 criticalText = obj.optString(KEY_CRITICAL_TEXT).takeIf { it.isNotEmpty() },
-                whenMillis = if (obj.has(KEY_WHEN)) obj.optLong(KEY_WHEN) else null,
+                whenMillis = if (obj.has(KEY_WHEN)) obj.optLong(KEY_WHEN) * MILLIS_PER_SECOND else null,
                 dismissAfterSeconds = if (obj.has(KEY_DISMISS_AFTER)) obj.optLong(KEY_DISMISS_AFTER) else null,
                 contentState = obj.optJSONObject(KEY_CONTENT_STATE),
                 topicName = obj.optString(KEY_TOPIC_NAME).takeIf { it.isNotEmpty() },
