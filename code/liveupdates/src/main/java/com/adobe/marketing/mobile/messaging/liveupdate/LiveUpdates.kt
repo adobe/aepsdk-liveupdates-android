@@ -46,7 +46,7 @@ import org.json.JSONObject
 object LiveUpdates {
 
     private const val SELF_TAG = "LiveUpdates"
-    private const val VERSION = "1.0.0"
+    private const val VERSION = "0.0.1"
 
     // Event dispatch constants.
     private const val EVENT_NAME_LIVE_UPDATE_TRACKING = "Live Update Event Tracking"
