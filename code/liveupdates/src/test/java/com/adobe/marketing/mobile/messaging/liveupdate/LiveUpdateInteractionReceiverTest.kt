@@ -68,7 +68,7 @@ class LiveUpdateInteractionReceiverTest {
             }
         })
 
-        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_END, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_END, "T", 1000L)
         val intent = mock(Intent::class.java)
         `when`(intent.action).thenReturn(LiveUpdateInteractionReceiver.ACTION_DISMISS)
         `when`(intent.getStringExtra(LiveUpdates.EXTRA_NOTIFICATION_ID)).thenReturn("id1")
