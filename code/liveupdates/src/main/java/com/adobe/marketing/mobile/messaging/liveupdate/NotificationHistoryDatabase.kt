@@ -31,7 +31,7 @@ import com.adobe.marketing.mobile.services.ServiceProvider
  * and is not a supported cross-module contract, only usable today because Java does not enforce
  * Kotlin's module-level `internal` visibility. Revisit once core exposes a proper API.
  */
-internal class NotificationHistoryDatabase private constructor(private val databasePath: String) {
+internal class NotificationHistoryDatabase internal constructor(private val databasePath: String) {
 
     private val dbMutex = Any()
 

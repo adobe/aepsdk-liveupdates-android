@@ -23,10 +23,7 @@ internal object NotificationHistoryManager {
     private const val SELF_TAG = "NotificationHistoryManager"
     private val TTL_MILLIS = TimeUnit.DAYS.toMillis(28)
 
-    // Room forbids DB access on the main thread, and `postLiveUpdate` may be called from it
-    // (e.g. a host app calling `triggerLocalLiveUpdate` from a UI callback). A dedicated
     // single-thread executor guarantees DB work never runs on the caller's thread while
-    // keeping this function's signature synchronous/blocking, matching the rest of the SDK.
     private val dbExecutor = Executors.newSingleThreadExecutor()
 
     /**
