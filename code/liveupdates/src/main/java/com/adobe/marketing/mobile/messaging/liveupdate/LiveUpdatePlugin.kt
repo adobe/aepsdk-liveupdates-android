@@ -106,9 +106,16 @@ class LiveUpdatePlugin(
      */
     internal fun postLiveUpdate(context: Context, payload: LiveUpdatePayload) {
         if (!NotificationHistoryManager.recordAndValidate(payload)) {
+            Log.warning(
+                LiveUpdatesConstants.LOG_TAG,
+                TAG,
+                "Dropping Live Update id=${payload.notificationId}: rejected by " +
+                    "NotificationHistoryManager (see prior warning for reason)."
+            )
             return
         }
         val style = styleProvider.provideStyle(payload)
+        // basic
         if (style == null) {
             Log.warning(
                 LiveUpdatesConstants.LOG_TAG,

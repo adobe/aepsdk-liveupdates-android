@@ -61,7 +61,7 @@ internal object NotificationHistoryManager {
                             "${payload.timestamp} is not newer than the last recorded timestamp " +
                             "(older or a duplicate)."
                     )
-                    // TODO: fire an XDM error event for this rejection once defined (see JIRA-TODO).
+                    // TODO: fire an XDM error event for this rejection once defined
                 }
                 accepted
             }.get()
