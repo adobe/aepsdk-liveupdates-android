@@ -129,8 +129,8 @@ class LiveUpdatePayloadTest {
         assertEquals("chan", payload.channelId)
         assertEquals("start", payload.eventType)
         assertEquals("Title", payload.title)
-        // envelope carries `timestamp` in epoch seconds; in-memory field is millis
-        assertEquals(1_000_000L, payload.timestamp)
+        // envelope carries `timestamp` in epoch seconds; used as-is, no conversion
+        assertEquals(1000L, payload.timestamp)
         assertNull(payload.priority)
         assertNull(payload.body)
         assertNull(payload.criticalText)
@@ -165,8 +165,9 @@ class LiveUpdatePayloadTest {
         val payload = LiveUpdatePayload.parse(message)
         assertNotNull(payload)
         payload!!
-        // envelope carries `timestamp`/`when` in epoch seconds; in-memory fields are millis
-        assertEquals(2_000_000L, payload.timestamp)
+        // envelope carries `timestamp` in epoch seconds; used as-is, no conversion.
+        // `when` still converts to millis (Android's setWhen() requires it).
+        assertEquals(2000L, payload.timestamp)
         assertEquals("PRIORITY_HIGH", payload.priority)
         assertEquals("Body text", payload.body)
         assertEquals("Critical!", payload.criticalText)
@@ -329,8 +330,8 @@ class LiveUpdatePayloadTest {
             timestamp = 5000L
         )
         val json = JSONObject(payload.toEnvelopeJson())
-        // envelope carries `timestamp` in epoch seconds (in-memory value is millis)
-        assertEquals(5L, json.optLong("timestamp"))
+        // timestamp round-trips through the envelope unchanged, no conversion
+        assertEquals(5000L, json.optLong("timestamp"))
         assertFalse(json.has("priority"))
         assertFalse(json.has("body"))
         assertFalse(json.has("critical_text"))
@@ -351,6 +352,18 @@ class LiveUpdatePayloadTest {
     fun `fromEnvelopeJson returns null when required field missing`() {
         val json = JSONObject().put("notification_id", "id1").toString()
         assertNull(LiveUpdatePayload.fromEnvelopeJson(json, null))
+    }
+
+    @Test
+    fun `parse returns null when timestamp is implausibly large (likely millis sent by mistake)`() {
+        val envelope = JSONObject()
+            .put("notification_id", "id1")
+            .put("notification_channel_id", "chan")
+            .put("event_type", "start")
+            .put("title", "Title")
+            .put("timestamp", 1758100000000L)
+        val message = remoteMessageWith(envelope.toString(), null)
+        assertNull(LiveUpdatePayload.parse(message))
     }
 
     private fun remoteMessageWith(envelopeJson: String, xdmRaw: String?): RemoteMessage {

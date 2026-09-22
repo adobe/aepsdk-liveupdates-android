@@ -41,6 +41,7 @@ internal class NotificationHistoryDatabase internal constructor(private val data
                 "$COLUMN_NOTIFICATION_ID TEXT NOT NULL, " +
                 "$COLUMN_CHANNEL_ID TEXT NOT NULL, " +
                 "$COLUMN_TIMESTAMP INTEGER NOT NULL, " +
+                "$COLUMN_EXPIRES_AT INTEGER NOT NULL, " +
                 "PRIMARY KEY ($COLUMN_NOTIFICATION_ID, $COLUMN_CHANNEL_ID));"
         synchronized(dbMutex) {
             SQLiteDatabaseHelper.createTableIfNotExist(databasePath, tableCreationQuery)
@@ -49,9 +50,8 @@ internal class NotificationHistoryDatabase internal constructor(private val data
 
     /**
      * Checks [newTimestamp] against the last stored value for this (notificationId, channelId)
-     * key and, if it is strictly newer, upserts it and evicts rows older than [cutoff]. The
-     * whole operation runs on one connection inside a single synchronized block, so no other
-     * call on this instance can interleave with it.
+     * key and, if it is strictly newer, upserts it (along with [expiresAt], precomputed by the
+     * caller as `newTimestamp + TTL`) and evicts rows whose stored `expiresAt` is before [now].
      *
      * @return `true` if [newTimestamp] was accepted and recorded; `false` if it was rejected -
      * either older than, or exactly equal to (a duplicate delivery), the last stored timestamp.
@@ -60,7 +60,8 @@ internal class NotificationHistoryDatabase internal constructor(private val data
         notificationId: String,
         channelId: String,
         newTimestamp: Long,
-        cutoff: Long
+        expiresAt: Long,
+        now: Long
     ): Boolean {
         synchronized(dbMutex) {
             var database: SQLiteDatabase? = null
@@ -79,6 +80,7 @@ internal class NotificationHistoryDatabase internal constructor(private val data
                     put(COLUMN_NOTIFICATION_ID, notificationId)
                     put(COLUMN_CHANNEL_ID, channelId)
                     put(COLUMN_TIMESTAMP, newTimestamp)
+                    put(COLUMN_EXPIRES_AT, expiresAt)
                 }
                 database.insertWithOnConflict(
                     TABLE_NAME,
@@ -87,7 +89,7 @@ internal class NotificationHistoryDatabase internal constructor(private val data
                     SQLiteDatabase.CONFLICT_REPLACE
                 )
 
-                database.delete(TABLE_NAME, "$COLUMN_TIMESTAMP < ?", arrayOf(cutoff.toString()))
+                database.delete(TABLE_NAME, "$COLUMN_EXPIRES_AT < ?", arrayOf(now.toString()))
                 return true
             } finally {
                 SQLiteDatabaseHelper.closeDatabase(database)
@@ -120,6 +122,7 @@ internal class NotificationHistoryDatabase internal constructor(private val data
         private const val COLUMN_NOTIFICATION_ID = "notificationId"
         private const val COLUMN_CHANNEL_ID = "channelId"
         private const val COLUMN_TIMESTAMP = "timestamp"
+        private const val COLUMN_EXPIRES_AT = "expiresAt"
 
         @Volatile
         private var instance: NotificationHistoryDatabase? = null

@@ -83,7 +83,7 @@ class LiveUpdatePayload private constructor(
         obj.put(KEY_CHANNEL_ID, channelId)
         obj.put(KEY_EVENT_TYPE, eventType)
         obj.put(KEY_TITLE, title)
-        obj.put(KEY_TIMESTAMP, timestamp / MILLIS_PER_SECOND)
+        obj.put(KEY_TIMESTAMP, timestamp)
         priority?.let { obj.put(KEY_PRIORITY, it) }
         body?.let { obj.put(KEY_BODY, it) }
         criticalText?.let { obj.put(KEY_CRITICAL_TEXT, it) }
@@ -116,11 +116,14 @@ class LiveUpdatePayload private constructor(
         // FCM data map key for the XDM passthrough block.
         private const val DATA_KEY_XDM = "_xdm"
 
-        // The envelope carries `timestamp` and `when` in epoch SECONDS (backend convention);
-        // in-memory fields (`timestamp`, `whenMillis`) are always millis. Converted at the
-        // parse/serialize boundary in fromEnvelopeJson/toEnvelopeJson so the rest of the SDK
-        // never has to think about units.
+        // `when` arrives in epoch seconds and is converted to millis for
+        // Android's NotificationCompat.Builder.setWhen()
         private const val MILLIS_PER_SECOND = 1000L
+
+        // Upper bound used to sanity-check that `timestamp` is actually seconds and not
+        // accidentally millis (a millis value would be ~1000x this, i.e. in the trillions).
+        // ~10 billion seconds is roughly the year 2286 — far past any real Live Update.
+        private const val MAX_PLAUSIBLE_TIMESTAMP_SECONDS = 10_000_000_000L
 
         /** Canonical Live Update event_type values the SDK dispatches tracking + listener callbacks for. */
         const val EVENT_TYPE_START = "start"
@@ -141,6 +144,11 @@ class LiveUpdatePayload private constructor(
          * chip programmatically. Required inputs match the envelope's required fields
          * (`notification_id`, `notification_channel_id`, `event_type`, `title`, `timestamp`);
          * everything else is optional and defaults to `null` / absent.
+         *
+         * @param timestamp epoch **seconds** (not millis), matching the backend envelope's
+         * `timestamp` field. Used as-is for staleness/regression checks in
+         * [NotificationHistoryManager]; passing millis here will be misread as a
+         * far-future/implausible timestamp.
          */
         @JvmStatic
         @JvmOverloads
@@ -218,8 +226,7 @@ class LiveUpdatePayload private constructor(
             val channelId = obj.requiredString(KEY_CHANNEL_ID) ?: return null
             val eventType = obj.requiredString(KEY_EVENT_TYPE) ?: return null
             val title = obj.requiredString(KEY_TITLE) ?: return null
-            val timestampSeconds = obj.requiredLong(KEY_TIMESTAMP) ?: return null
-            val timestamp = timestampSeconds * MILLIS_PER_SECOND
+            val timestamp = obj.requiredSecondsTimestamp(KEY_TIMESTAMP) ?: return null
 
             // Parse the _xdm block as a typed JSONObject. Opaque to the SDK; null when
             // absent or unparseable. Carried through to the tracking dispatch so AJO
@@ -280,6 +287,19 @@ class LiveUpdatePayload private constructor(
                 return null
             }
             return optLong(key)
+        }
+
+        private fun JSONObject.requiredSecondsTimestamp(key: String): Long? {
+            val value = requiredLong(key) ?: return null
+            if (value <= 0 || value > MAX_PLAUSIBLE_TIMESTAMP_SECONDS) {
+                Log.debug(
+                    LiveUpdatesConstants.LOG_TAG,
+                    SELF_TAG,
+                    "adb_liveupdate_data field '$key' is not a valid epoch seconds timestamp: $value"
+                )
+                return null
+            }
+            return value
         }
     }
 }

@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit
  */
 internal object NotificationHistoryManager {
     private const val SELF_TAG = "NotificationHistoryManager"
-    private val TTL_MILLIS = TimeUnit.DAYS.toMillis(28)
+    private val TTL_SECONDS = TimeUnit.DAYS.toSeconds(28)
 
     // single-thread executor guarantees DB work never runs on the caller's thread while
     private val dbExecutor = Executors.newSingleThreadExecutor()
@@ -31,15 +31,13 @@ internal object NotificationHistoryManager {
      * (already logged) and should be dropped by the caller.
      */
     fun recordAndValidate(payload: LiveUpdatePayload): Boolean {
-        val now = System.currentTimeMillis()
-        val cutoff = now - TTL_MILLIS
+        val now = System.currentTimeMillis() / 1000
 
-        if (now - payload.timestamp > TTL_MILLIS) {
+        if (now - payload.timestamp > TTL_SECONDS) {
             Log.warning(
                 LiveUpdatesConstants.LOG_TAG,
                 SELF_TAG,
-                "Dropping Live Update id=${payload.notificationId}: timestamp is older than " +
-                    "the 28-day FCM delivery window"
+                "Dropping Live Update id=${payload.notificationId}: timestamp is older than the 28-day FCM delivery window"
             )
             // TODO: fire an XDM error event for this rejection
             return false
@@ -47,11 +45,13 @@ internal object NotificationHistoryManager {
 
         return try {
             dbExecutor.submit<Boolean> {
+                val expiresAt = payload.timestamp + TTL_SECONDS
                 val accepted = NotificationHistoryDatabase.getInstance().recordIfNewer(
                     payload.notificationId,
                     payload.channelId,
                     payload.timestamp,
-                    cutoff
+                    expiresAt,
+                    now
                 )
                 if (!accepted) {
                     Log.warning(

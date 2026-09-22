@@ -200,11 +200,9 @@ class LiveUpdatesTest {
 
     @Test
     fun `triggerLocalLiveUpdate returns false when no plugin registered`() {
-        mockStatic(MobileCore::class.java).use { coreMock ->
-            coreMock.`when`<ILiveupdatePlugin?> { MobileCore.getPlugin(ILiveupdatePlugin::class.java) }
-                .thenReturn(null)
-            assertFalse(LiveUpdates.triggerLocalLiveUpdate(mock(Context::class.java), payload()))
-        }
+        mobileCoreMock.`when`<ILiveupdatePlugin?> { MobileCore.getPlugin(ILiveupdatePlugin::class.java) }
+            .thenReturn(null)
+        assertFalse(LiveUpdates.triggerLocalLiveUpdate(mock(Context::class.java), payload()))
     }
 
     @Test
@@ -212,11 +210,9 @@ class LiveUpdatesTest {
         val customPlugin = object : ILiveupdatePlugin {
             override fun handleLiveUpdatePush(context: Context, message: Any) {}
         }
-        mockStatic(MobileCore::class.java).use { coreMock ->
-            coreMock.`when`<ILiveupdatePlugin?> { MobileCore.getPlugin(ILiveupdatePlugin::class.java) }
-                .thenReturn(customPlugin)
-            assertFalse(LiveUpdates.triggerLocalLiveUpdate(mock(Context::class.java), payload()))
-        }
+        mobileCoreMock.`when`<ILiveupdatePlugin?> { MobileCore.getPlugin(ILiveupdatePlugin::class.java) }
+            .thenReturn(customPlugin)
+        assertFalse(LiveUpdates.triggerLocalLiveUpdate(mock(Context::class.java), payload()))
     }
 
     @Test
@@ -224,13 +220,11 @@ class LiveUpdatesTest {
         val pluginImpl = mock(LiveUpdatePlugin::class.java)
         val context = mock(Context::class.java)
         val p = payload()
-        mockStatic(MobileCore::class.java).use { coreMock ->
-            coreMock.`when`<ILiveupdatePlugin?> { MobileCore.getPlugin(ILiveupdatePlugin::class.java) }
-                .thenReturn(pluginImpl)
-            val result = LiveUpdates.triggerLocalLiveUpdate(context, p)
-            assertTrue(result)
-            verify(pluginImpl).postLiveUpdate(context, p)
-        }
+        mobileCoreMock.`when`<ILiveupdatePlugin?> { MobileCore.getPlugin(ILiveupdatePlugin::class.java) }
+            .thenReturn(pluginImpl)
+        val result = LiveUpdates.triggerLocalLiveUpdate(context, p)
+        assertTrue(result)
+        verify(pluginImpl).postLiveUpdate(context, p)
     }
 
     // =====================================================================
@@ -628,7 +622,7 @@ class LiveUpdatesTest {
                 received = payload
             }
         })
-        val p = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_END, "T")
+        val p = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_END, "T", 1000L)
         val intent = mock(Intent::class.java)
         `when`(intent.getStringExtra(LiveUpdates.EXTRA_PAYLOAD)).thenReturn(p.toEnvelopeJson())
 
@@ -645,7 +639,7 @@ class LiveUpdatesTest {
                 throw RuntimeException("boom")
             }
         })
-        val p = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_END, "T")
+        val p = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_END, "T", 1000L)
         val intent = mock(Intent::class.java)
         `when`(intent.getStringExtra(LiveUpdates.EXTRA_PAYLOAD)).thenReturn(p.toEnvelopeJson())
 
@@ -690,6 +684,7 @@ class LiveUpdatesTest {
         channelId = "chan",
         eventType = eventType,
         title = "Title",
+        timestamp = 1000L,
         topicName = topicName,
         xdm = xdm
     )
