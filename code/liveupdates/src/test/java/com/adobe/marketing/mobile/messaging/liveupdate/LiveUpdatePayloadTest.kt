@@ -381,6 +381,31 @@ class LiveUpdatePayloadTest {
         assertNull(payload!!.whenSeconds)
     }
 
+    @Test
+    fun `parse returns null when timestamp is missing (required field, unlike when)`() {
+        val envelope = JSONObject()
+            .put("notification_id", "id1")
+            .put("notification_channel_id", "chan")
+            .put("event_type", "start")
+            .put("title", "Title")
+        val message = remoteMessageWith(envelope.toString(), null)
+
+        assertNull(LiveUpdatePayload.parse(message))
+    }
+
+    @Test
+    fun `parse returns null when timestamp is zero or negative`() {
+        val envelope = JSONObject()
+            .put("notification_id", "id1")
+            .put("notification_channel_id", "chan")
+            .put("event_type", "start")
+            .put("title", "Title")
+            .put("timestamp", 0L)
+        val message = remoteMessageWith(envelope.toString(), null)
+
+        assertNull(LiveUpdatePayload.parse(message))
+    }
+
     private fun remoteMessageWith(envelopeJson: String, xdmRaw: String?): RemoteMessage {
         val message = mock(RemoteMessage::class.java)
         val data = mutableMapOf("adb_liveupdate_data" to envelopeJson)
