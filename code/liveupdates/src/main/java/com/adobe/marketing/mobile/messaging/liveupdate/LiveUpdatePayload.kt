@@ -42,7 +42,7 @@ class LiveUpdatePayload private constructor(
     val priority: String?,
     val body: String?,
     val criticalText: String?,
-    val whenMillis: Long?,
+    val whenSeconds: Long?,
     val dismissAfterSeconds: Long?,
     val contentState: JSONObject?,
 
@@ -87,7 +87,7 @@ class LiveUpdatePayload private constructor(
         priority?.let { obj.put(KEY_PRIORITY, it) }
         body?.let { obj.put(KEY_BODY, it) }
         criticalText?.let { obj.put(KEY_CRITICAL_TEXT, it) }
-        whenMillis?.let { obj.put(KEY_WHEN, it / MILLIS_PER_SECOND) }
+        whenSeconds?.let { obj.put(KEY_WHEN, it) }
         dismissAfterSeconds?.let { obj.put(KEY_DISMISS_AFTER, it) }
         contentState?.let { obj.put(KEY_CONTENT_STATE, it) }
         topicName?.let { obj.put(KEY_TOPIC_NAME, it) }
@@ -115,10 +115,6 @@ class LiveUpdatePayload private constructor(
 
         // FCM data map key for the XDM passthrough block.
         private const val DATA_KEY_XDM = "_xdm"
-
-        // `when` arrives in epoch seconds and is converted to millis for
-        // Android's NotificationCompat.Builder.setWhen()
-        private const val MILLIS_PER_SECOND = 1000L
 
         // Upper bound used to sanity-check that `timestamp` is actually seconds and not
         // accidentally millis (a millis value would be ~1000x this, i.e. in the trillions).
@@ -161,7 +157,7 @@ class LiveUpdatePayload private constructor(
             priority: String? = null,
             body: String? = null,
             criticalText: String? = null,
-            whenMillis: Long? = null,
+            whenSeconds: Long? = null,
             dismissAfterSeconds: Long? = null,
             contentState: JSONObject? = null,
             topicName: String? = null,
@@ -176,7 +172,7 @@ class LiveUpdatePayload private constructor(
             priority = priority,
             body = body,
             criticalText = criticalText,
-            whenMillis = whenMillis,
+            whenSeconds = whenSeconds,
             dismissAfterSeconds = dismissAfterSeconds,
             contentState = contentState,
             topicName = topicName,
@@ -253,7 +249,7 @@ class LiveUpdatePayload private constructor(
                 priority = obj.optString(KEY_PRIORITY).takeIf { it.isNotEmpty() },
                 body = obj.optString(KEY_BODY).takeIf { it.isNotEmpty() },
                 criticalText = obj.optString(KEY_CRITICAL_TEXT).takeIf { it.isNotEmpty() },
-                whenMillis = if (obj.has(KEY_WHEN)) obj.optLong(KEY_WHEN) * MILLIS_PER_SECOND else null,
+                whenSeconds = if (obj.has(KEY_WHEN)) obj.optLong(KEY_WHEN) else null,
                 dismissAfterSeconds = if (obj.has(KEY_DISMISS_AFTER)) obj.optLong(KEY_DISMISS_AFTER) else null,
                 contentState = obj.optJSONObject(KEY_CONTENT_STATE),
                 topicName = obj.optString(KEY_TOPIC_NAME).takeIf { it.isNotEmpty() },

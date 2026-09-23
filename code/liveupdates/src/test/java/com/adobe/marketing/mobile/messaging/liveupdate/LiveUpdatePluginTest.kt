@@ -143,7 +143,7 @@ class LiveUpdatePluginTest {
             timestamp = nowSeconds,
             body = "Body",
             criticalText = "Crit",
-            whenMillis = 1234L
+            whenSeconds = 1234L
         )
 
         handler().postLiveUpdate(context, payload)

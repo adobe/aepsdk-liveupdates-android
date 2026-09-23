@@ -30,9 +30,18 @@ internal object NotificationHistoryManager {
      * @return `true` if [payload] is valid and was recorded; `false` if it was rejected
      * (already logged) and should be dropped by the caller.
      */
-    fun recordAndValidate(payload: LiveUpdatePayload): Boolean {
-        val now = System.currentTimeMillis() / 1000
+    fun recordAndValidate(payload: LiveUpdatePayload): Boolean =
+        isTimestampFresh(payload) && recordTimestamp(payload)
 
+    /**
+     * Pure staleness check: is [payload]'s timestamp within the 28-day FCM delivery window.
+     * Does not touch the database.
+     *
+     * @return `true` if the timestamp is fresh enough to consider; `false` if it's already
+     * outside the window (already logged) and should be dropped by the caller.
+     */
+    internal fun isTimestampFresh(payload: LiveUpdatePayload): Boolean {
+        val now = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis())
         if (now - payload.timestamp > TTL_SECONDS) {
             Log.warning(
                 LiveUpdatesConstants.LOG_TAG,
@@ -42,7 +51,20 @@ internal object NotificationHistoryManager {
             // TODO: fire an XDM error event for this rejection
             return false
         }
+        return true
+    }
 
+    /**
+     * Persists [payload]'s timestamp if it's newer than the last recorded one for its
+     * (notificationId, channelId) key, evicting expired rows alongside the write. Runs on a
+     * dedicated background thread; fails open (returns `true`) if the DB operation itself
+     * throws, so a broken database never blocks a Live Update from rendering.
+     *
+     * @return `true` if recorded (or the DB failed open); `false` if rejected as a
+     * regression/duplicate (already logged) and should be dropped by the caller.
+     */
+    internal fun recordTimestamp(payload: LiveUpdatePayload): Boolean {
+        val now = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis())
         return try {
             dbExecutor.submit<Boolean> {
                 val expiresAt = payload.timestamp + TTL_SECONDS

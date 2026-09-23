@@ -25,6 +25,7 @@ import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload.Compani
 import com.adobe.marketing.mobile.plugin.ILiveupdatePlugin
 import com.adobe.marketing.mobile.services.Log
 import com.google.firebase.messaging.RemoteMessage
+import java.util.concurrent.TimeUnit
 
 /**
  * Canonical [ILiveupdatePlugin] implementation. Parses the [RemoteMessage] into a
@@ -143,14 +144,14 @@ class LiveUpdatePlugin(
             .setContentIntent(buildTapPendingIntent(context, payload))
             .setDeleteIntent(buildDismissPendingIntent(context, payload))
         payload.criticalText?.let { builder.setShortCriticalText(it) }
-        payload.whenMillis?.let { builder.setWhen(it).setShowWhen(true) }
+        payload.whenSeconds?.let { builder.setWhen(TimeUnit.SECONDS.toMillis(it)).setShowWhen(true) }
 
         // Apply auto-dismiss only for the terminal `end` push, and only when dismiss_after is
         // present and positive. The chip persists through start/update pushes and then times
         // out the server-specified number of seconds after the end push is received.
         if (payload.eventType == EVENT_TYPE_END) {
             payload.dismissAfterSeconds?.takeIf { it > 0L }?.let {
-                builder.setTimeoutAfter(it * 1000L)
+                builder.setTimeoutAfter(TimeUnit.SECONDS.toMillis(it))
             }
         }
 

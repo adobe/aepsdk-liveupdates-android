@@ -134,7 +134,7 @@ class LiveUpdatePayloadTest {
         assertNull(payload.priority)
         assertNull(payload.body)
         assertNull(payload.criticalText)
-        assertNull(payload.whenMillis)
+        assertNull(payload.whenSeconds)
         assertNull(payload.dismissAfterSeconds)
         assertNull(payload.contentState)
         assertNull(payload.topicName)
@@ -171,7 +171,7 @@ class LiveUpdatePayloadTest {
         assertEquals("PRIORITY_HIGH", payload.priority)
         assertEquals("Body text", payload.body)
         assertEquals("Critical!", payload.criticalText)
-        assertEquals(12_345_000L, payload.whenMillis)
+        assertEquals(12345L, payload.whenSeconds)
         assertEquals(60L, payload.dismissAfterSeconds)
         assertEquals(42, payload.contentState?.optInt("custom_key_progress"))
         assertEquals("topic1", payload.topicName)
@@ -242,7 +242,7 @@ class LiveUpdatePayloadTest {
             priority = "PRIORITY_MAX",
             body = "Body2",
             criticalText = "Crit2",
-            whenMillis = 999L,
+            whenSeconds = 999L,
             dismissAfterSeconds = 30L,
             contentState = contentState,
             topicName = "topicX",
@@ -253,7 +253,7 @@ class LiveUpdatePayloadTest {
         assertEquals("PRIORITY_MAX", payload.priority)
         assertEquals("Body2", payload.body)
         assertEquals("Crit2", payload.criticalText)
-        assertEquals(999L, payload.whenMillis)
+        assertEquals(999L, payload.whenSeconds)
         assertEquals(30L, payload.dismissAfterSeconds)
         assertEquals("v", payload.contentState?.optString("k"))
         assertEquals("topicX", payload.topicName)
@@ -275,9 +275,7 @@ class LiveUpdatePayloadTest {
             priority = "PRIORITY_LOW",
             body = "Body3",
             criticalText = "Crit3",
-            // must be a multiple of 1000: toEnvelopeJson/fromEnvelopeJson round-trip through
-            // epoch seconds, which truncates any sub-second precision
-            whenMillis = 111_000L,
+            whenSeconds = 111_000L,
             dismissAfterSeconds = 10L,
             contentState = contentState,
             topicName = "topicY",
@@ -297,7 +295,7 @@ class LiveUpdatePayloadTest {
         assertEquals(original.priority, rehydrated.priority)
         assertEquals(original.body, rehydrated.body)
         assertEquals(original.criticalText, rehydrated.criticalText)
-        assertEquals(original.whenMillis, rehydrated.whenMillis)
+        assertEquals(original.whenSeconds, rehydrated.whenSeconds)
         assertEquals(original.dismissAfterSeconds, rehydrated.dismissAfterSeconds)
         assertEquals(original.contentState.toString(), rehydrated.contentState.toString())
         assertEquals(original.topicName, rehydrated.topicName)
