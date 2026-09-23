@@ -222,7 +222,7 @@ class LiveUpdatePayload private constructor(
             val channelId = obj.requiredString(KEY_CHANNEL_ID) ?: return null
             val eventType = obj.requiredString(KEY_EVENT_TYPE) ?: return null
             val title = obj.requiredString(KEY_TITLE) ?: return null
-            val timestamp = obj.requiredSecondsTimestamp(KEY_TIMESTAMP) ?: return null
+            val timestamp = obj.secondsTimestamp(KEY_TIMESTAMP, required = true) ?: return null
 
             // Parse the _xdm block as a typed JSONObject. Opaque to the SDK; null when
             // absent or unparseable. Carried through to the tracking dispatch so AJO
@@ -249,7 +249,7 @@ class LiveUpdatePayload private constructor(
                 priority = obj.optString(KEY_PRIORITY).takeIf { it.isNotEmpty() },
                 body = obj.optString(KEY_BODY).takeIf { it.isNotEmpty() },
                 criticalText = obj.optString(KEY_CRITICAL_TEXT).takeIf { it.isNotEmpty() },
-                whenSeconds = if (obj.has(KEY_WHEN)) obj.optLong(KEY_WHEN) else null,
+                whenSeconds = obj.secondsTimestamp(KEY_WHEN, required = false),
                 dismissAfterSeconds = if (obj.has(KEY_DISMISS_AFTER)) obj.optLong(KEY_DISMISS_AFTER) else null,
                 contentState = obj.optJSONObject(KEY_CONTENT_STATE),
                 topicName = obj.optString(KEY_TOPIC_NAME).takeIf { it.isNotEmpty() },
@@ -273,21 +273,27 @@ class LiveUpdatePayload private constructor(
             return value
         }
 
-        private fun JSONObject.requiredLong(key: String): Long? {
+        /**
+         * Reads [key] as an epoch-seconds timestamp, validating it's plausible (rejects
+         * `<= 0` or values so large they look like millis sent by mistake). A missing key is
+         * only logged when [required] - callers use this for both the required `timestamp`
+         * field (missing/invalid fails the whole payload via `?: return null`) and the
+         * optional `when` field (missing is fine; invalid just drops that one field, since
+         * `when` is cosmetic display only and shouldn't fail the whole payload).
+         */
+        private fun JSONObject.secondsTimestamp(key: String, required: Boolean): Long? {
             if (!has(key)) {
-                Log.debug(
-                    LiveUpdatesConstants.LOG_TAG,
-                    SELF_TAG,
-                    "adb_liveupdate_data missing required field '$key'"
-                )
+                if (required) {
+                    Log.debug(
+                        LiveUpdatesConstants.LOG_TAG,
+                        SELF_TAG,
+                        "adb_liveupdate_data missing required field '$key'"
+                    )
+                }
                 return null
             }
-            return optLong(key)
-        }
-
-        private fun JSONObject.requiredSecondsTimestamp(key: String): Long? {
-            val value = requiredLong(key) ?: return null
-            if (value <= 0 || value > MAX_PLAUSIBLE_TIMESTAMP_SECONDS) {
+            val value = optLong(key)
+            if (value !in 1..MAX_PLAUSIBLE_TIMESTAMP_SECONDS) {
                 Log.debug(
                     LiveUpdatesConstants.LOG_TAG,
                     SELF_TAG,

@@ -165,8 +165,8 @@ class LiveUpdatePayloadTest {
         val payload = LiveUpdatePayload.parse(message)
         assertNotNull(payload)
         payload!!
-        // envelope carries `timestamp` in epoch seconds; used as-is, no conversion.
-        // `when` still converts to millis (Android's setWhen() requires it).
+        // `timestamp` and `when` are carried in epoch seconds, used as-is; conversion to
+        // millis only happens at the Android API boundary (NotificationCompat.Builder.setWhen()).
         assertEquals(2000L, payload.timestamp)
         assertEquals("PRIORITY_HIGH", payload.priority)
         assertEquals("Body text", payload.body)
@@ -362,6 +362,23 @@ class LiveUpdatePayloadTest {
             .put("timestamp", 1758100000000L)
         val message = remoteMessageWith(envelope.toString(), null)
         assertNull(LiveUpdatePayload.parse(message))
+    }
+
+    @Test
+    fun `parse ignores an implausible when value but still posts the payload`() {
+        val envelope = JSONObject()
+            .put("notification_id", "id1")
+            .put("notification_channel_id", "chan")
+            .put("event_type", "start")
+            .put("title", "Title")
+            .put("timestamp", 1000L)
+            .put("when", 1758100000000L) // millis sent by mistake
+        val message = remoteMessageWith(envelope.toString(), null)
+
+        val payload = LiveUpdatePayload.parse(message)
+
+        assertNotNull(payload)
+        assertNull(payload!!.whenSeconds)
     }
 
     private fun remoteMessageWith(envelopeJson: String, xdmRaw: String?): RemoteMessage {
