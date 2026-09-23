@@ -124,6 +124,17 @@ class LiveUpdatePluginTest {
     }
 
     @Test
+    fun `postLiveUpdate drops the push when the timestamp is stale`() {
+        val staleTimestamp = nowSeconds - java.util.concurrent.TimeUnit.DAYS.toSeconds(29)
+        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", staleTimestamp)
+
+        handler().postLiveUpdate(context, payload)
+
+        assertTrue(shadowOf(notificationManager()).allNotifications.isEmpty())
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
+    }
+
+    @Test
     fun `postLiveUpdate posts an ongoing notification and dispatches tracking + listener`() {
         val calls = mutableListOf<String>()
         LiveUpdates.setLiveUpdateListener(object : ILiveUpdateListener {
