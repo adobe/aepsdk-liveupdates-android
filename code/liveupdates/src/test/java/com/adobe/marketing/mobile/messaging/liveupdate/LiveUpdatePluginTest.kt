@@ -41,6 +41,11 @@ class LiveUpdatePluginTest {
     private lateinit var mobileCoreMock: MockedStatic<MobileCore>
     private val context = RuntimeEnvironment.getApplication()
 
+    // Payloads posted through postLiveUpdate() now run through NotificationHistoryManager's
+    // staleness check (payloads older than 28 days are dropped before rendering), so tests
+    // that exercise the full post path need a "now"-ish timestamp, not an arbitrary constant.
+    private val nowSeconds = System.currentTimeMillis() / 1000
+
     @Before
     fun setUp() {
         mobileCoreMock = mockStatic(MobileCore::class.java)
@@ -90,7 +95,7 @@ class LiveUpdatePluginTest {
     @Test
     fun `handleLiveUpdatePush drops the push when interceptor vetoes`() {
         LiveUpdates.setLiveUpdateInterceptor(interceptorReturning(false))
-        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
 
         handler().handleLiveUpdatePush(context, remoteMessage(payload))
 
@@ -101,7 +106,7 @@ class LiveUpdatePluginTest {
     @Test
     fun `handleLiveUpdatePush proceeds and posts when interceptor allows`() {
         LiveUpdates.setLiveUpdateInterceptor(interceptorReturning(true))
-        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
 
         handler().handleLiveUpdatePush(context, remoteMessage(payload))
 
@@ -110,9 +115,20 @@ class LiveUpdatePluginTest {
 
     @Test
     fun `postLiveUpdate drops the push when style provider returns null`() {
-        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
 
         handler(style = null).postLiveUpdate(context, payload)
+
+        assertTrue(shadowOf(notificationManager()).allNotifications.isEmpty())
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
+    }
+
+    @Test
+    fun `postLiveUpdate drops the push when the timestamp is stale`() {
+        val staleTimestamp = nowSeconds - java.util.concurrent.TimeUnit.DAYS.toSeconds(29)
+        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", staleTimestamp)
+
+        handler().postLiveUpdate(context, payload)
 
         assertTrue(shadowOf(notificationManager()).allNotifications.isEmpty())
         mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
@@ -135,9 +151,10 @@ class LiveUpdatePluginTest {
             channelId = "chan",
             eventType = LiveUpdatePayload.EVENT_TYPE_START,
             title = "Title",
+            timestamp = nowSeconds,
             body = "Body",
             criticalText = "Crit",
-            whenMillis = 1234L
+            whenSeconds = 1234L
         )
 
         handler().postLiveUpdate(context, payload)
@@ -157,6 +174,7 @@ class LiveUpdatePluginTest {
             channelId = "chan",
             eventType = LiveUpdatePayload.EVENT_TYPE_END,
             title = "Title",
+            timestamp = nowSeconds,
             dismissAfterSeconds = 5L
         )
 
@@ -173,6 +191,7 @@ class LiveUpdatePluginTest {
             channelId = "chan",
             eventType = LiveUpdatePayload.EVENT_TYPE_END,
             title = "Title",
+            timestamp = nowSeconds,
             dismissAfterSeconds = 0L
         )
 
@@ -189,6 +208,7 @@ class LiveUpdatePluginTest {
             channelId = "chan",
             eventType = LiveUpdatePayload.EVENT_TYPE_START,
             title = "Title",
+            timestamp = nowSeconds,
             dismissAfterSeconds = 5L
         )
 
@@ -200,7 +220,7 @@ class LiveUpdatePluginTest {
 
     @Test
     fun `postLiveUpdate never adds notification action buttons`() {
-        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
 
         handler().postLiveUpdate(context, payload)
 
@@ -210,7 +230,7 @@ class LiveUpdatePluginTest {
 
     @Test
     fun `postLiveUpdate creates the channel with high importance when not pre-registered`() {
-        val payload = LiveUpdatePayload.create("id1", "chan-new", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan-new", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
 
         handler().postLiveUpdate(context, payload)
 
@@ -224,7 +244,7 @@ class LiveUpdatePluginTest {
         nm.createNotificationChannel(
             NotificationChannel("chan-existing", "Existing", NotificationManager.IMPORTANCE_LOW)
         )
-        val payload = LiveUpdatePayload.create("id1", "chan-existing", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan-existing", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
 
         handler().postLiveUpdate(context, payload)
 
@@ -248,6 +268,7 @@ class LiveUpdatePluginTest {
                 channelId = "chan",
                 eventType = LiveUpdatePayload.EVENT_TYPE_START,
                 title = "Title",
+                timestamp = nowSeconds,
                 priority = priority
             )
             handler().postLiveUpdate(context, payload)
@@ -264,6 +285,7 @@ class LiveUpdatePluginTest {
             channelId = "chan",
             eventType = LiveUpdatePayload.EVENT_TYPE_START,
             title = "T",
+            timestamp = nowSeconds,
             smallIcon = "test_liveupdate_icon"
         )
 
@@ -285,6 +307,7 @@ class LiveUpdatePluginTest {
             channelId = "chan",
             eventType = LiveUpdatePayload.EVENT_TYPE_START,
             title = "T",
+            timestamp = nowSeconds,
             smallIcon = "no_such_drawable_exists"
         )
 
@@ -297,7 +320,7 @@ class LiveUpdatePluginTest {
     @Config(sdk = [21])
     @Test
     fun `ensureChannelExists is a no-op below API 26`() {
-        val payload = LiveUpdatePayload.create("id1", "chan-old", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan-old", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
 
         // Should not throw even though NotificationManager#createNotificationChannel doesn't
         // exist pre-O; postLiveUpdate should still post the notification normally.

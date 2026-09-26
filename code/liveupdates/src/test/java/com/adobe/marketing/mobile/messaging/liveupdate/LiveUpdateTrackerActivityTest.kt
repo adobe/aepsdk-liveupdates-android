@@ -54,7 +54,7 @@ class LiveUpdateTrackerActivityTest {
         intent.putExtra(LiveUpdates.EXTRA_NOTIFICATION_ID, "id1")
         intent.putExtra(LiveUpdates.EXTRA_EVENT_TYPE, LiveUpdatePayload.EVENT_TYPE_START)
         if (withPayload) {
-            val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T")
+            val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", 1000L)
             intent.putExtra(LiveUpdates.EXTRA_PAYLOAD, payload.toEnvelopeJson())
         }
         return intent
