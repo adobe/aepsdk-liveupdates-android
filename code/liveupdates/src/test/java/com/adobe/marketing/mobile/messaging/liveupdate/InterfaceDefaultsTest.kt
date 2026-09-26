@@ -27,7 +27,7 @@ class InterfaceDefaultsTest {
     @Test
     fun `ILiveUpdateListener default methods are no-ops and do not throw`() {
         val listener = object : ILiveUpdateListener {}
-        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", 1000L)
 
         listener.onLiveUpdateReceived(payload)
         listener.onStart(payload)
@@ -41,7 +41,7 @@ class InterfaceDefaultsTest {
         val interceptor = object : ILiveUpdateInterceptor {
             override fun shouldDisplayLiveUpdate(payload: LiveUpdatePayload) = true
         }
-        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", 1000L)
         assertTrue(interceptor.shouldDisplayLiveUpdate(payload))
     }
 
@@ -49,7 +49,7 @@ class InterfaceDefaultsTest {
     fun `ILiveUpdateStyleProvider SAM implementation is invoked`() {
         val style = NotificationCompat.BigTextStyle()
         val provider = ILiveUpdateStyleProvider { style }
-        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", 1000L)
         assertSame(style, provider.provideStyle(payload))
     }
 }

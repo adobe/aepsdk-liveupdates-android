@@ -39,7 +39,8 @@ public class JvmOverloadsCoverageTest {
 			"id1",
 			"chan",
 			LiveUpdatePayload.EVENT_TYPE_START,
-			"Title"
+			"Title",
+			1000L
 		);
 		assertNotNull(payload);
 		assertEquals("id1", payload.getNotificationId());

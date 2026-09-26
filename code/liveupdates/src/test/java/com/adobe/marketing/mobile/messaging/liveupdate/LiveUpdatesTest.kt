@@ -692,7 +692,7 @@ class LiveUpdatesTest {
                 received = payload
             }
         })
-        val p = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_END, "T")
+        val p = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_END, "T", 1000L)
         val intent = mock(Intent::class.java)
         `when`(intent.getStringExtra(LiveUpdates.EXTRA_PAYLOAD)).thenReturn(p.toEnvelopeJson())
 
@@ -709,7 +709,7 @@ class LiveUpdatesTest {
                 throw RuntimeException("boom")
             }
         })
-        val p = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_END, "T")
+        val p = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_END, "T", 1000L)
         val intent = mock(Intent::class.java)
         `when`(intent.getStringExtra(LiveUpdates.EXTRA_PAYLOAD)).thenReturn(p.toEnvelopeJson())
 
@@ -754,6 +754,7 @@ class LiveUpdatesTest {
         channelId = "chan",
         eventType = eventType,
         title = "Title",
+        timestamp = 1000L,
         topicName = topicName,
         xdm = xdm
     )
