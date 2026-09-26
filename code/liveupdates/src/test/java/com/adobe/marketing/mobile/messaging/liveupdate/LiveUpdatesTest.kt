@@ -14,6 +14,8 @@ package com.adobe.marketing.mobile.messaging.liveupdate
 import android.content.Context
 import android.content.Intent
 import com.adobe.marketing.mobile.Event
+import com.adobe.marketing.mobile.EventSource
+import com.adobe.marketing.mobile.EventType
 import com.adobe.marketing.mobile.MobileCore
 import com.adobe.marketing.mobile.plugin.ILiveupdatePlugin
 import com.google.firebase.messaging.RemoteMessage
@@ -581,6 +583,74 @@ class LiveUpdatesTest {
         )
         val xdmMap = xdmMap(captureEvent())
         assertEquals(listOf("a", null), xdmMap["customList"])
+    }
+
+    // =====================================================================
+    // Render error / incompatibility events (Event Hub only)
+    // =====================================================================
+
+    @Test
+    fun `dispatchRenderErrorEvent dispatches an Event Hub event, not an experience event`() {
+        LiveUpdates.dispatchRenderErrorEvent(
+            subcategory = LiveUpdates.ERROR_SUBCATEGORY_STYLE_NULL,
+            payload = payload(notificationId = "notif1", topicName = "topicA")
+        )
+        val event = captureEvent()
+        // Event Hub only: MESSAGING + ERROR_RESPONSE_CONTENT (never EDGE + REQUEST_CONTENT,
+        // which is what routes the experience tracking events to Edge / AJO).
+        assertEquals(EventType.MESSAGING, event.type)
+        assertEquals(EventSource.ERROR_RESPONSE_CONTENT, event.source)
+        val xdm = xdmMap(event)
+        assertEquals("liveUpdateTracking.renderError", xdm["eventType"])
+        val la = liveActivity(xdm)
+        assertEquals(LiveUpdates.ERROR_SUBCATEGORY_STYLE_NULL, la["event"])
+        assertEquals("notif1", la["liveActivityID"])
+        assertEquals("topicA", la["channelID"])
+    }
+
+    @Test
+    fun `dispatchIncompatibleEvent dispatches an Event Hub incompatible event`() {
+        LiveUpdates.dispatchIncompatibleEvent(
+            subcategory = LiveUpdates.INCOMPATIBLE_SUBCATEGORY_DEVICE_API_BELOW_36,
+            payload = payload(notificationId = "notif2")
+        )
+        val event = captureEvent()
+        assertEquals(EventType.MESSAGING, event.type)
+        assertEquals(EventSource.ERROR_RESPONSE_CONTENT, event.source)
+        val xdm = xdmMap(event)
+        assertEquals("liveUpdateTracking.incompatible", xdm["eventType"])
+        assertEquals(
+            LiveUpdates.INCOMPATIBLE_SUBCATEGORY_DEVICE_API_BELOW_36,
+            liveActivity(xdm)["event"]
+        )
+    }
+
+    @Test
+    fun `error events never carry a dataset override even when one is configured`() {
+        // The dataset override only makes sense for events routed to Edge. These stay on the hub.
+        setCachedDatasetId("dataset123")
+        LiveUpdates.dispatchRenderErrorEvent(
+            subcategory = LiveUpdates.ERROR_SUBCATEGORY_APP_DISCARDED,
+            payload = payload()
+        )
+        val event = captureEvent()
+        assertFalse(event.eventData!!.containsKey("meta"))
+    }
+
+    @Test
+    fun `error events merge the incoming xdm passthrough`() {
+        val xdm = JSONObject().put(
+            "mixins",
+            JSONObject().put("messageExecution", JSONObject().put("messageExecutionID", "exec1"))
+        )
+        LiveUpdates.dispatchRenderErrorEvent(
+            subcategory = LiveUpdates.ERROR_SUBCATEGORY_APP_DISCARDED,
+            payload = payload(notificationId = "notif1", xdm = xdm)
+        )
+        val xdmMap = xdmMap(captureEvent())
+        @Suppress("UNCHECKED_CAST")
+        val messageExecution = xdmMap["messageExecution"] as Map<String, Any?>
+        assertEquals("exec1", messageExecution["messageExecutionID"])
     }
 
     // =====================================================================

@@ -50,6 +50,10 @@ object LiveUpdates {
 
     // Event dispatch constants.
     private const val EVENT_NAME_LIVE_UPDATE_TRACKING = "Live Update Event Tracking"
+    // Names for the Event Hub-only diagnostic events (see dispatchRenderErrorEvent /
+    // dispatchIncompatibleEvent). These are NOT experience events and never reach Edge.
+    private const val EVENT_NAME_LIVE_UPDATE_RENDER_ERROR = "Live Update Render Error"
+    private const val EVENT_NAME_LIVE_UPDATE_INCOMPATIBLE = "Live Update Incompatible"
     private const val EVENT_DATA_KEY_XDM = "xdm"
 
     // XDM schema field names - match the canonical AJO Push Tracking Experience Event Schema,
@@ -73,6 +77,36 @@ object LiveUpdates {
     private const val XDM_VALUE_LIVE_UPDATE_TRACKING_TOPIC = "liveUpdateTracking.topic"
     private const val XDM_VALUE_LIVE_UPDATE_TRACKING_APPLICATION_OPENED = "liveUpdateTracking.applicationOpened"
     private const val XDM_VALUE_LIVE_UPDATE_TRACKING_CUSTOM_ACTION = "liveUpdateTracking.customAction"
+
+    // ---- Render error / incompatibility reporting (Event Hub events only) ----
+    // These report customer-payload / environment problems the SDK hits while trying to render
+    // an incoming Live Update; they are not defects in the SDK itself, hence "renderError".
+    // Categories: the top-level XDM `eventType`, mirroring the reporting-facing tracking
+    // categories above. Unlike the tracking events these ride the Event Hub only (dispatched
+    // with EventType.MESSAGING + EventSource.ERROR_RESPONSE_CONTENT) and are never forwarded
+    // to Edge / AJO, so they carry no dataset override. The subcategory rides in
+    // pushChannelContext.liveActivity.event, exactly like the liveupdate_* lifecycle values.
+    private const val XDM_VALUE_LIVE_UPDATE_TRACKING_RENDER_ERROR = "liveUpdateTracking.renderError"
+    private const val XDM_VALUE_LIVE_UPDATE_TRACKING_INCOMPATIBLE = "liveUpdateTracking.incompatible"
+
+    // Category A subcategories (liveUpdateTracking.renderError). Internal so LiveUpdatePlugin,
+    // which owns the render pipeline where these conditions surface, can reference them.
+    // TODO(no_plugin): a "no_plugin" subcategory belongs here once the Messaging SDK reports
+    //   the case where a Live Update push arrives but no ILiveupdatePlugin is registered.
+    // TODO(stale_timestamp): a subcategory for "a very old timestamp was received" belongs
+    //   here once timestamp validation exists in the parse / receive path (no such code today).
+    internal const val ERROR_SUBCATEGORY_APP_DISCARDED = "app_discarded"
+    internal const val ERROR_SUBCATEGORY_NOTIFICATION_PERMISSION_MISSING = "notification_permission_missing"
+    internal const val ERROR_SUBCATEGORY_STYLE_NULL = "style_null"
+
+    // Category B subcategories (liveUpdateTracking.incompatible). One per precondition the
+    // renderer checks before a notification can be promoted to a Live Update chip.
+    internal const val INCOMPATIBLE_SUBCATEGORY_DEVICE_API_BELOW_36 = "device_api_below_36"
+    internal const val INCOMPATIBLE_SUBCATEGORY_NOT_PROMOTABLE = "not_promotable"
+    internal const val INCOMPATIBLE_SUBCATEGORY_NOTIFICATION_MANAGER_UNAVAILABLE = "notification_manager_unavailable"
+    internal const val INCOMPATIBLE_SUBCATEGORY_CHANNEL_NOT_REGISTERED = "channel_not_registered"
+    internal const val INCOMPATIBLE_SUBCATEGORY_CHANNEL_IMPORTANCE_LOW = "channel_importance_low"
+    internal const val INCOMPATIBLE_SUBCATEGORY_PROMOTION_NOT_PERMITTED = "promotion_not_permitted"
     private const val XDM_KEY_PUSH_NOTIFICATION_TRACKING = "pushNotificationTracking"
     private const val XDM_KEY_CUSTOM_ACTION = "customAction"
     private const val XDM_KEY_ACTION_ID = "actionID"
@@ -612,6 +646,81 @@ object LiveUpdates {
             EventType.EDGE,
             EventSource.REQUEST_CONTENT
         ).setEventData(eventData).build()
+        MobileCore.dispatchEvent(event)
+    }
+
+    // ---------- Render error / incompatibility reporting (Event Hub only) ----------
+
+    /**
+     * Dispatches a render-error diagnostic as an Event Hub event (category
+     * `liveUpdateTracking.renderError`). Fired when the SDK cannot render an otherwise
+     * well-formed Live Update because of a customer-payload or environment problem - the app's
+     * interceptor discarded it, the style provider returned null, or the OS is not permitted to
+     * post the notification. It reports a problem outside the SDK, not an SDK defect. [subcategory]
+     * is one of the `ERROR_SUBCATEGORY_*` values and rides in `pushChannelContext.liveActivity.event`.
+     *
+     * The originating [payload] supplies the correlation fields (`notificationId`, `topicName`,
+     * and the `_xdm` passthrough); [subcategory] is the only thing not carried on the payload.
+     *
+     * Unlike the lifecycle / interaction tracking dispatches, this is NOT an experience event:
+     * it is dispatched with [EventType.MESSAGING] + [EventSource.ERROR_RESPONSE_CONTENT] so it
+     * stays on the Event Hub and is never forwarded to Edge / AJO.
+     */
+    internal fun dispatchRenderErrorEvent(subcategory: String, payload: LiveUpdatePayload) {
+        dispatchErrorHubEvent(
+            eventName = EVENT_NAME_LIVE_UPDATE_RENDER_ERROR,
+            xdmEventType = XDM_VALUE_LIVE_UPDATE_TRACKING_RENDER_ERROR,
+            subcategory = subcategory,
+            payload = payload
+        )
+    }
+
+    /**
+     * Dispatches an incompatibility diagnostic as an Event Hub event (category
+     * `liveUpdateTracking.incompatible`). Fired when a Live Update posts but cannot be promoted
+     * to a status-bar chip because a device / channel / notification precondition failed.
+     * [subcategory] is one of the `INCOMPATIBLE_SUBCATEGORY_*` values and rides in
+     * `pushChannelContext.liveActivity.event`. The originating [payload] supplies the correlation
+     * fields.
+     *
+     * Event Hub only (see [dispatchRenderErrorEvent]); never forwarded to Edge / AJO.
+     */
+    internal fun dispatchIncompatibleEvent(subcategory: String, payload: LiveUpdatePayload) {
+        dispatchErrorHubEvent(
+            eventName = EVENT_NAME_LIVE_UPDATE_INCOMPATIBLE,
+            xdmEventType = XDM_VALUE_LIVE_UPDATE_TRACKING_INCOMPATIBLE,
+            subcategory = subcategory,
+            payload = payload
+        )
+    }
+
+    /**
+     * Shared build + dispatch for the Event Hub-only error / incompatibility diagnostics. Pulls
+     * the correlation fields (`notificationId`, `topicName`, `_xdm`) off [payload] and reuses
+     * [buildLiveActivityTrackingXdm] so the shape matches the tracking events (category in
+     * `eventType`, subcategory in `pushChannelContext.liveActivity.event`), but dispatches with
+     * [EventType.MESSAGING] + [EventSource.ERROR_RESPONSE_CONTENT] and attaches no dataset
+     * override, since these events are consumed on the hub and never routed to Edge.
+     */
+    private fun dispatchErrorHubEvent(
+        eventName: String,
+        xdmEventType: String,
+        subcategory: String,
+        payload: LiveUpdatePayload
+    ) {
+        val xdmMap = buildLiveActivityTrackingXdm(
+            xdmEventType = xdmEventType,
+            notificationId = payload.notificationId,
+            topicName = payload.topicName,
+            liveActivityEvent = subcategory,
+            incomingXdm = payload.xdm,
+            customActionId = null
+        )
+        val event = Event.Builder(
+            eventName,
+            EventType.MESSAGING,
+            EventSource.ERROR_RESPONSE_CONTENT
+        ).setEventData(mapOf<String, Any?>(EVENT_DATA_KEY_XDM to xdmMap)).build()
         MobileCore.dispatchEvent(event)
     }
 
