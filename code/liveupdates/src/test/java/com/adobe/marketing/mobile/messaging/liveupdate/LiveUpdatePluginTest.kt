@@ -38,6 +38,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
@@ -100,9 +101,8 @@ class LiveUpdatePluginTest {
     @Test
     fun `handleLiveUpdatePush drops the push and reports render_error app_discarded when interceptor vetoes`() {
         LiveUpdates.setLiveUpdateInterceptor(interceptorReturning(false))
-        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
         val payload = LiveUpdatePayload.create(
-            "id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", topicName = "topicA"
+            "id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds, topicName = "topicA"
         )
 
         handler().handleLiveUpdatePush(context, remoteMessage(payload))
@@ -131,26 +131,11 @@ class LiveUpdatePluginTest {
     }
 
     @Test
-    fun `postLiveUpdate drops the push when style provider returns null`() {
-        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
     fun `postLiveUpdate still posts without a style and reports render_error style_null when style provider returns null`() {
-        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
 
         handler(style = null).postLiveUpdate(context, payload)
 
-        assertTrue(shadowOf(notificationManager()).allNotifications.isEmpty())
-        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
-    }
-
-    @Test
-    fun `postLiveUpdate drops the push when the timestamp is stale`() {
-        val staleTimestamp = nowSeconds - java.util.concurrent.TimeUnit.DAYS.toSeconds(29)
-        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", staleTimestamp)
-
-        handler().postLiveUpdate(context, payload)
-
-        assertTrue(shadowOf(notificationManager()).allNotifications.isEmpty())
-        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
         // The notification still posts, just without a promoted style.
         assertEquals(1, shadowOf(notificationManager()).allNotifications.size)
         val error = capturedEvents().single {
@@ -159,6 +144,17 @@ class LiveUpdatePluginTest {
         assertEquals(EventType.MESSAGING, error.type)
         assertEquals(EventSource.ERROR_RESPONSE_CONTENT, error.source)
         assertEquals("liveUpdateTracking.renderError", categoryOf(error))
+    }
+
+    @Test
+    fun `postLiveUpdate drops the push when the timestamp is stale`() {
+        val staleTimestamp = nowSeconds - TimeUnit.DAYS.toSeconds(29)
+        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", staleTimestamp)
+
+        handler().postLiveUpdate(context, payload)
+
+        assertTrue(shadowOf(notificationManager()).allNotifications.isEmpty())
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
     }
 
     @Test
@@ -200,7 +196,7 @@ class LiveUpdatePluginTest {
     fun `postLiveUpdate reports incompatible device_api_below_36 on a pre-36 device`() {
         // Test target runs at API 33 (see class @Config), so promotion to a chip is impossible.
         val payload = LiveUpdatePayload.create(
-            "id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", topicName = "topicA"
+            "id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds, topicName = "topicA"
         )
 
         handler().postLiveUpdate(context, payload)
@@ -223,7 +219,7 @@ class LiveUpdatePluginTest {
     @Test
     fun `postLiveUpdate reports render_error notification_permission_missing when notifications are disabled`() {
         shadowOf(notificationManager()).setNotificationsEnabled(false)
-        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
 
         handler().postLiveUpdate(context, payload)
 
@@ -259,6 +255,7 @@ class LiveUpdatePluginTest {
             channelId = "chan",
             eventType = LiveUpdatePayload.EVENT_TYPE_END,
             title = "Title",
+            timestamp = nowSeconds,
             dismissAfterSeconds = 0L
         )
 
@@ -275,6 +272,7 @@ class LiveUpdatePluginTest {
             channelId = "chan",
             eventType = LiveUpdatePayload.EVENT_TYPE_START,
             title = "Title",
+            timestamp = nowSeconds,
             dismissAfterSeconds = 5L
         )
 
@@ -286,7 +284,7 @@ class LiveUpdatePluginTest {
 
     @Test
     fun `postLiveUpdate never adds notification action buttons`() {
-        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
 
         handler().postLiveUpdate(context, payload)
 
@@ -296,7 +294,7 @@ class LiveUpdatePluginTest {
 
     @Test
     fun `postLiveUpdate creates the channel with high importance when not pre-registered`() {
-        val payload = LiveUpdatePayload.create("id1", "chan-new", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan-new", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
 
         handler().postLiveUpdate(context, payload)
 
@@ -310,7 +308,7 @@ class LiveUpdatePluginTest {
         nm.createNotificationChannel(
             NotificationChannel("chan-existing", "Existing", NotificationManager.IMPORTANCE_LOW)
         )
-        val payload = LiveUpdatePayload.create("id1", "chan-existing", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan-existing", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
 
         handler().postLiveUpdate(context, payload)
 
@@ -334,6 +332,7 @@ class LiveUpdatePluginTest {
                 channelId = "chan",
                 eventType = LiveUpdatePayload.EVENT_TYPE_START,
                 title = "Title",
+                timestamp = nowSeconds,
                 priority = priority
             )
             handler().postLiveUpdate(context, payload)
@@ -350,6 +349,7 @@ class LiveUpdatePluginTest {
             channelId = "chan",
             eventType = LiveUpdatePayload.EVENT_TYPE_START,
             title = "T",
+            timestamp = nowSeconds,
             smallIcon = "test_liveupdate_icon"
         )
 
