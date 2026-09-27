@@ -147,14 +147,46 @@ class LiveUpdatePluginTest {
     }
 
     @Test
-    fun `postLiveUpdate drops the push when the timestamp is stale`() {
+    fun `postLiveUpdate drops the push and reports render_error invalid_timestamp when the timestamp is stale`() {
         val staleTimestamp = nowSeconds - TimeUnit.DAYS.toSeconds(29)
-        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", staleTimestamp)
+        val payload = LiveUpdatePayload.create(
+            "id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", staleTimestamp, topicName = "topicA"
+        )
 
         handler().postLiveUpdate(context, payload)
 
         assertTrue(shadowOf(notificationManager()).allNotifications.isEmpty())
-        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
+        // Exactly one Event Hub event: the render_error invalid_timestamp diagnostic. Nothing renders.
+        val events = capturedEvents()
+        assertEquals(1, events.size)
+        val error = events[0]
+        assertEquals(EventType.MESSAGING, error.type)
+        assertEquals(EventSource.ERROR_RESPONSE_CONTENT, error.source)
+        assertEquals("liveUpdateTracking.renderError", categoryOf(error))
+        assertEquals(LiveUpdates.ERROR_SUBCATEGORY_INVALID_TIMESTAMP, subcategoryOf(error))
+        assertEquals("id1", liveActivityIdOf(error))
+        assertEquals("topicA", channelIdOf(error))
+    }
+
+    @Test
+    fun `postLiveUpdate drops the push and reports render_error invalid_event_type for an unknown event_type`() {
+        val payload = LiveUpdatePayload.create(
+            "id1", "chan", "some_random_state", "T", nowSeconds, topicName = "topicA"
+        )
+
+        handler().postLiveUpdate(context, payload)
+
+        // Unknown event_type: nothing renders, and exactly one render-error diagnostic fires.
+        assertTrue(shadowOf(notificationManager()).allNotifications.isEmpty())
+        val events = capturedEvents()
+        assertEquals(1, events.size)
+        val error = events[0]
+        assertEquals(EventType.MESSAGING, error.type)
+        assertEquals(EventSource.ERROR_RESPONSE_CONTENT, error.source)
+        assertEquals("liveUpdateTracking.renderError", categoryOf(error))
+        assertEquals(LiveUpdates.ERROR_SUBCATEGORY_INVALID_EVENT_TYPE, subcategoryOf(error))
+        assertEquals("id1", liveActivityIdOf(error))
+        assertEquals("topicA", channelIdOf(error))
     }
 
     @Test

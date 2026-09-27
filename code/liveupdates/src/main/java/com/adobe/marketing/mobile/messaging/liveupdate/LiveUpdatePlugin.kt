@@ -109,6 +109,19 @@ class LiveUpdatePlugin(
      * ([LiveUpdates.triggerLocalLiveUpdate]).
      */
     internal fun postLiveUpdate(context: Context, payload: LiveUpdatePayload) {
+        // Reject an unrecognized event_type (anything other than start / update / end / localstart)
+        // before any history or rendering work: a random state from the backend is not a Live
+        // Update the SDK knows how to render, so drop it and report the render error.
+        if (!payload.isCanonicalEventType) {
+            Log.warning(
+                LiveUpdatesConstants.LOG_TAG,
+                TAG,
+                "Dropping Live Update id=${payload.notificationId}: unrecognized " +
+                    "event_type='${payload.eventType}' (expected start / update / end)."
+            )
+            LiveUpdates.dispatchRenderErrorEvent(LiveUpdates.ERROR_SUBCATEGORY_INVALID_EVENT_TYPE, payload)
+            return
+        }
         if (!NotificationHistoryManager.recordAndValidate(payload)) {
             Log.warning(
                 LiveUpdatesConstants.LOG_TAG,

@@ -89,15 +89,27 @@ object LiveUpdates {
     private const val XDM_VALUE_LIVE_UPDATE_TRACKING_RENDER_ERROR = "liveUpdateTracking.renderError"
     private const val XDM_VALUE_LIVE_UPDATE_TRACKING_INCOMPATIBLE = "liveUpdateTracking.incompatible"
 
-    // Category A subcategories (liveUpdateTracking.renderError). Internal so LiveUpdatePlugin,
-    // which owns the render pipeline where these conditions surface, can reference them.
+    // Category A subcategories (liveUpdateTracking.renderError). Internal so LiveUpdatePlugin
+    // and NotificationHistoryManager, which own the render / validation pipeline where these
+    // conditions surface, can reference them.
     // TODO(no_plugin): a "no_plugin" subcategory belongs here once the Messaging SDK reports
     //   the case where a Live Update push arrives but no ILiveupdatePlugin is registered.
-    // TODO(stale_timestamp): a subcategory for "a very old timestamp was received" belongs
-    //   here once timestamp validation exists in the parse / receive path (no such code today).
     internal const val ERROR_SUBCATEGORY_APP_DISCARDED = "app_discarded"
     internal const val ERROR_SUBCATEGORY_NOTIFICATION_PERMISSION_MISSING = "notification_permission_missing"
     internal const val ERROR_SUBCATEGORY_STYLE_NULL = "style_null"
+
+    // Fired (and the Live Update dropped, never rendered) when the incoming payload's timestamp
+    // is older than the 28-day FCM delivery window - an absolute staleness failure.
+    internal const val ERROR_SUBCATEGORY_INVALID_TIMESTAMP = "invalid_timestamp"
+
+    // Fired (and the Live Update dropped) when the incoming payload's timestamp is not newer than
+    // the last state already recorded for the same (notificationId, channelId) - i.e. an update
+    // that arrived out of order (older) or a duplicate, superseded by a state already received.
+    internal const val ERROR_SUBCATEGORY_OUTDATED_TIMESTAMP = "outdated_timestamp"
+
+    // Fired (and the Live Update dropped) when event_type is not one the SDK recognizes
+    // (start / update / end); a random or unknown state from the backend.
+    internal const val ERROR_SUBCATEGORY_INVALID_EVENT_TYPE = "invalid_event_type"
 
     // Category B subcategories (liveUpdateTracking.incompatible). One per precondition the
     // renderer checks before a notification can be promoted to a Live Update chip.
@@ -540,11 +552,7 @@ object LiveUpdates {
      */
     internal fun dispatchLiveUpdateEventTracking(context: Context, payload: LiveUpdatePayload) {
         val eventType = payload.eventType
-        val isCanonical = eventType == LiveUpdatePayload.EVENT_TYPE_START ||
-            eventType == LiveUpdatePayload.EVENT_TYPE_UPDATE ||
-            eventType == LiveUpdatePayload.EVENT_TYPE_END ||
-            eventType == LiveUpdatePayload.EVENT_TYPE_LOCAL_START
-        if (!isCanonical) {
+        if (!payload.isCanonicalEventType) {
             Log.debug(
                 LiveUpdatesConstants.LOG_TAG, SELF_TAG,
                 "Skipping Live Update event tracking dispatch: event_type='$eventType' is not start/update/end."

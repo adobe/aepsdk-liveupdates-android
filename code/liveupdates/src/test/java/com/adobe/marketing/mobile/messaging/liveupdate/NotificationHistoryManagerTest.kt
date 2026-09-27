@@ -11,12 +11,33 @@
 
 package com.adobe.marketing.mobile.messaging.liveupdate
 
+import com.adobe.marketing.mobile.MobileCore
+import org.junit.After
+import org.junit.Before
 import org.junit.Test
+import org.mockito.ArgumentMatchers.any
+import org.mockito.MockedStatic
+import org.mockito.Mockito.mockStatic
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class NotificationHistoryManagerTest {
+
+    // recordAndValidate dispatches the old_timestamp render error via MobileCore on a stale
+    // rejection, so the static must be mocked to keep these plain (non-Robolectric) tests off
+    // the real Event Hub.
+    private lateinit var mobileCoreMock: MockedStatic<MobileCore>
+
+    @Before
+    fun setUp() {
+        mobileCoreMock = mockStatic(MobileCore::class.java)
+    }
+
+    @After
+    fun tearDown() {
+        mobileCoreMock.close()
+    }
 
     @Test
     fun `isTimestampFresh rejects a timestamp older than the 28-day TTL`() {
@@ -59,6 +80,8 @@ class NotificationHistoryManagerTest {
         )
 
         assertFalse(NotificationHistoryManager.recordAndValidate(payload))
+        // The stale rejection dispatches the invalid_timestamp render error to the Event Hub.
+        mobileCoreMock.verify { MobileCore.dispatchEvent(any()) }
     }
 
     @Test

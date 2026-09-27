@@ -29,13 +29,29 @@ internal object NotificationHistoryManager {
     /**
      * @return `true` if [payload] is valid and was recorded; `false` if it was rejected
      * (already logged) and should be dropped by the caller.
+     *
+     * On rejection this also dispatches the matching Event Hub `renderError` diagnostic
+     * (see [LiveUpdates.dispatchRenderErrorEvent]):
+     *  - `invalid_timestamp` when the timestamp is older than the 28-day FCM delivery window.
+     *  - `outdated_timestamp` when the timestamp is not newer than the last state already
+     *    recorded for this (notificationId, channelId) - an out-of-order or duplicate update.
      */
-    fun recordAndValidate(payload: LiveUpdatePayload): Boolean =
-        isTimestampFresh(payload) && recordTimestamp(payload)
+    fun recordAndValidate(payload: LiveUpdatePayload): Boolean {
+        if (!isTimestampFresh(payload)) {
+            LiveUpdates.dispatchRenderErrorEvent(LiveUpdates.ERROR_SUBCATEGORY_INVALID_TIMESTAMP, payload)
+            return false
+        }
+        if (!recordTimestamp(payload)) {
+            LiveUpdates.dispatchRenderErrorEvent(LiveUpdates.ERROR_SUBCATEGORY_OUTDATED_TIMESTAMP, payload)
+            return false
+        }
+        return true
+    }
 
     /**
      * Pure staleness check: is [payload]'s timestamp within the 28-day FCM delivery window.
-     * Does not touch the database.
+     * Does not touch the database and does not dispatch any event; [recordAndValidate] owns the
+     * `old_timestamp` diagnostic for the rejection.
      *
      * @return `true` if the timestamp is fresh enough to consider; `false` if it's already
      * outside the window (already logged) and should be dropped by the caller.
@@ -48,7 +64,6 @@ internal object NotificationHistoryManager {
                 SELF_TAG,
                 "Dropping Live Update id=${payload.notificationId}: timestamp is older than the 28-day FCM delivery window"
             )
-            // TODO: fire an XDM error event for this rejection
             return false
         }
         return true
@@ -83,7 +98,7 @@ internal object NotificationHistoryManager {
                             "${payload.timestamp} is not newer than the last recorded timestamp " +
                             "(older or a duplicate)."
                     )
-                    // TODO: fire an XDM error event for this rejection once defined
+                    // recordAndValidate dispatches the outdated_timestamp render error for this case.
                 }
                 accepted
             }.get()

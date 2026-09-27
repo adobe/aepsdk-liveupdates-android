@@ -63,6 +63,17 @@ class LiveUpdatePayload private constructor(
 ) {
 
     /**
+     * True when [eventType] is one of the values the SDK renders and tracks:
+     * `start` / `update` / `end`, plus the app-raised `localstart`. A payload whose
+     * `event_type` is anything else is an unrecognized state and is dropped by the renderer.
+     */
+    internal val isCanonicalEventType: Boolean
+        get() = eventType == EVENT_TYPE_START ||
+            eventType == EVENT_TYPE_UPDATE ||
+            eventType == EVENT_TYPE_END ||
+            eventType == EVENT_TYPE_LOCAL_START
+
+    /**
      * Concise, log-friendly representation. The default (non-data-class) `toString()` would
      * only print the object hash, so this surfaces the key identifying fields instead.
      */

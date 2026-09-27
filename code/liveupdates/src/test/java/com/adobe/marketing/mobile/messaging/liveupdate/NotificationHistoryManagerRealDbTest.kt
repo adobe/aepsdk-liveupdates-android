@@ -15,6 +15,8 @@ import com.adobe.marketing.mobile.MobileCore
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.mockito.ArgumentMatchers.any
+import org.mockito.Mockito.mockStatic
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
@@ -48,5 +50,35 @@ class NotificationHistoryManagerRealDbTest {
 
         assertTrue(NotificationHistoryManager.recordAndValidate(payload))
         assertFalse(NotificationHistoryManager.recordAndValidate(payload))
+    }
+
+    @Test
+    fun `recordAndValidate rejects an out-of-order update and reports outdated_timestamp`() {
+        val now = System.currentTimeMillis() / 1000
+        val newer = LiveUpdatePayload.create(
+            notificationId = "ooo-id",
+            channelId = "ooo-chan",
+            eventType = LiveUpdatePayload.EVENT_TYPE_START,
+            title = "Title",
+            timestamp = now
+        )
+        val older = LiveUpdatePayload.create(
+            notificationId = "ooo-id",
+            channelId = "ooo-chan",
+            eventType = LiveUpdatePayload.EVENT_TYPE_UPDATE,
+            title = "Title",
+            timestamp = now - 100
+        )
+
+        // First (newer) delivery is recorded; no error dispatched.
+        assertTrue(NotificationHistoryManager.recordAndValidate(newer))
+
+        // The older, out-of-order delivery is rejected and reports the outdated_timestamp error.
+        // The app context set in setUp() already populated ServiceProvider, so the real DB keeps
+        // working while MobileCore is mocked here to capture the dispatch.
+        mockStatic(MobileCore::class.java).use { mobileCoreMock ->
+            assertFalse(NotificationHistoryManager.recordAndValidate(older))
+            mobileCoreMock.verify { MobileCore.dispatchEvent(any()) }
+        }
     }
 }
