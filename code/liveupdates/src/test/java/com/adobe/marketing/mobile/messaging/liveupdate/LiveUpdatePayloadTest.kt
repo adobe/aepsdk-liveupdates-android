@@ -94,13 +94,16 @@ class LiveUpdatePayloadTest {
     }
 
     @Test
-    fun `parse returns null when title missing`() {
+    fun `parse succeeds when title missing (title is optional)`() {
         val envelope = JSONObject()
             .put("notification_id", "id1")
             .put("notification_channel_id", "chan")
             .put("event_type", "start")
+            .put("timestamp", 1000L)
         val message = remoteMessageWith(envelope.toString(), null)
-        assertNull(LiveUpdatePayload.parse(message))
+        val payload = LiveUpdatePayload.parse(message)
+        assertNotNull(payload)
+        assertNull(payload!!.title)
     }
 
     @Test

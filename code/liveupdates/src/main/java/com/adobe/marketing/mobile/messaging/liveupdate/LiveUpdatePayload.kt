@@ -29,15 +29,19 @@ import org.json.JSONObject
  *  - `notification_id`
  *  - `notification_channel_id`
  *  - `event_type`
- *  - `title`
  *  - `timestamp`
+ *
+ * `title` is optional. The platform requires a `contentTitle` to promote a notification to a
+ * Live Update chip, so a title-less payload still parses and renders but degrades to a normal
+ * ongoing notification (surfaced via the `incompatible` diagnostic). Styles differ in whether a
+ * title is visually needed, so the SDK does not hard-require it.
  */
 class LiveUpdatePayload private constructor(
     // SDK-canonical fields (drive NotificationCompat.Builder calls and event tracking)
     val notificationId: String,
     val channelId: String,
     val eventType: String,
-    val title: String,
+    val title: String?,
     val timestamp: Long,
     val priority: String?,
     val body: String?,
@@ -93,7 +97,7 @@ class LiveUpdatePayload private constructor(
         obj.put(KEY_NOTIFICATION_ID, notificationId)
         obj.put(KEY_CHANNEL_ID, channelId)
         obj.put(KEY_EVENT_TYPE, eventType)
-        obj.put(KEY_TITLE, title)
+        title?.let { obj.put(KEY_TITLE, it) }
         obj.put(KEY_TIMESTAMP, timestamp)
         priority?.let { obj.put(KEY_PRIORITY, it) }
         body?.let { obj.put(KEY_BODY, it) }
@@ -149,9 +153,11 @@ class LiveUpdatePayload private constructor(
          * intermediate `RemoteMessage`. Primary use case is
          * [LiveUpdates.triggerLocalLiveUpdate], where the host app raises a Live Update
          * chip programmatically. Required inputs match the envelope's required fields
-         * (`notification_id`, `notification_channel_id`, `event_type`, `title`, `timestamp`);
-         * everything else is optional and defaults to `null` / absent.
+         * (`notification_id`, `notification_channel_id`, `event_type`, `timestamp`);
+         * everything else, including `title`, is optional and defaults to `null` / absent.
          *
+         * @param title optional; a title-less payload still renders but will not promote to a
+         * Live Update chip (the platform requires a `contentTitle` for promotion).
          * @param timestamp epoch **seconds** (not millis), matching the backend envelope's
          * `timestamp` field. Used as-is for staleness/regression checks in
          * [NotificationHistoryManager]; passing millis here will be misread as a
@@ -163,7 +169,7 @@ class LiveUpdatePayload private constructor(
             notificationId: String,
             channelId: String,
             eventType: String,
-            title: String,
+            title: String?,
             timestamp: Long,
             priority: String? = null,
             body: String? = null,
@@ -199,7 +205,7 @@ class LiveUpdatePayload private constructor(
         /**
          * Parses [message] into a [LiveUpdatePayload]. Returns `null` when the envelope is
          * absent, malformed, or missing any required field (`notification_id`,
-         * `notification_channel_id`, `event_type`, `title`).
+         * `notification_channel_id`, `event_type`, `timestamp`). `title` is optional.
          */
         @JvmStatic
         fun parse(message: RemoteMessage): LiveUpdatePayload? {
@@ -232,7 +238,9 @@ class LiveUpdatePayload private constructor(
             val notificationId = obj.requiredString(KEY_NOTIFICATION_ID) ?: return null
             val channelId = obj.requiredString(KEY_CHANNEL_ID) ?: return null
             val eventType = obj.requiredString(KEY_EVENT_TYPE) ?: return null
-            val title = obj.requiredString(KEY_TITLE) ?: return null
+            // title is optional: a title-less payload still parses (it renders but will not be
+            // promoted to a chip, since the platform requires a contentTitle for promotion).
+            val title = obj.optString(KEY_TITLE).takeIf { it.isNotEmpty() }
             val timestamp = obj.secondsTimestamp(KEY_TIMESTAMP, required = true) ?: return null
 
             // Parse the _xdm block as a typed JSONObject. Opaque to the SDK; null when
