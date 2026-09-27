@@ -80,7 +80,8 @@ class LiveUpdatesApplication : Application() {
             Identity.updateIdentities(identityMap)
         }
         MobileCore.addPlugins(LiveUpdatePlugin(SampleLiveUpdateStyleProvider(applicationContext)))
-        // Assurance.startSession(ASSURANCE_SESSION_URL)
+        if(ASSURANCE_SESSION_URL.isNotEmpty())
+            Assurance.startSession(ASSURANCE_SESSION_URL)
         val dismissedStore = DismissedLiveUpdateStore(applicationContext)
         LiveUpdates.setLiveUpdateInterceptor(
             SampleLiveUpdateInterceptor(applicationContext, dismissedStore)
@@ -144,6 +145,7 @@ class LiveUpdatesApplication : Application() {
                 }
                 unsubscribeFromTopic(payload)
             }
+
         })
     }
 
