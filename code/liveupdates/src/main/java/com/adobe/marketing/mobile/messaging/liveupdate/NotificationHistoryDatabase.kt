@@ -45,13 +45,17 @@ internal class NotificationHistoryDatabase internal constructor(private val data
                 "$COLUMN_EXPIRES_AT INTEGER NOT NULL, " +
                 "PRIMARY KEY ($COLUMN_NOTIFICATION_ID, $COLUMN_CHANNEL_ID));"
         // Registry of Live Updates started locally via LiveUpdates.triggerLocalLiveUpdate. Keyed by
-        // (notificationId, channelId); startedAt is epoch seconds. An entry is removed when the
-        // first backend update/end arrives for it (the localstart catch-up), see consumeLocalStart.
+        // (notificationId, channelId); eventTimestamp is epoch MILLISECONDS captured when the local
+        // start happened - the same clock/unit an Event's own timestamp uses, so the deferred
+        // localstart tracking event can be stamped with it. (The history table's `timestamp` is
+        // epoch seconds from the payload, used only for stale-update checks.) An entry is removed
+        // when the first backend update/end arrives for it (the localstart catch-up), see
+        // consumeLocalStart.
         val localStartTableQuery =
             "CREATE TABLE IF NOT EXISTS $TABLE_LOCAL_STARTS (" +
                 "$COLUMN_NOTIFICATION_ID TEXT NOT NULL, " +
                 "$COLUMN_CHANNEL_ID TEXT NOT NULL, " +
-                "$COLUMN_STARTED_AT INTEGER NOT NULL, " +
+                "$COLUMN_EVENT_TIMESTAMP INTEGER NOT NULL, " +
                 "PRIMARY KEY ($COLUMN_NOTIFICATION_ID, $COLUMN_CHANNEL_ID));"
         synchronized(dbMutex) {
             SQLiteDatabaseHelper.createTableIfNotExist(databasePath, tableCreationQuery)
@@ -130,9 +134,9 @@ internal class NotificationHistoryDatabase internal constructor(private val data
 
     /**
      * Records that the Live Update identified by ([notificationId], [channelId]) was started
-     * locally at [startedAt] (epoch seconds). Upserts the row.
+     * locally at [eventTimestampMillis] (epoch milliseconds). Upserts the row.
      *
-     * Opportunistically evicts entries older than [LOCAL_START_TTL_SECONDS] (a locally-started
+     * Opportunistically evicts entries older than [LOCAL_START_TTL_MILLIS] (a locally-started
      * activity that never received a backend update/end would otherwise linger).
      *
      * TODO(local-start-cleanup): this on-write eviction only runs when another local start is
@@ -140,7 +144,7 @@ internal class NotificationHistoryDatabase internal constructor(private val data
      *   task or an eviction pass tied to notification render. Aligned with the timestamp table's
      *   own eviction approach.
      */
-    fun recordLocalStart(notificationId: String, channelId: String, startedAt: Long) {
+    fun recordLocalStart(notificationId: String, channelId: String, eventTimestampMillis: Long) {
         synchronized(dbMutex) {
             var database: SQLiteDatabase? = null
             try {
@@ -151,7 +155,7 @@ internal class NotificationHistoryDatabase internal constructor(private val data
                 val contentValues = ContentValues().apply {
                     put(COLUMN_NOTIFICATION_ID, notificationId)
                     put(COLUMN_CHANNEL_ID, channelId)
-                    put(COLUMN_STARTED_AT, startedAt)
+                    put(COLUMN_EVENT_TIMESTAMP, eventTimestampMillis)
                 }
                 database.insertWithOnConflict(
                     TABLE_LOCAL_STARTS,
@@ -159,9 +163,8 @@ internal class NotificationHistoryDatabase internal constructor(private val data
                     contentValues,
                     SQLiteDatabase.CONFLICT_REPLACE
                 )
-                val cutoff = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis()) -
-                    LOCAL_START_TTL_SECONDS
-                database.delete(TABLE_LOCAL_STARTS, "$COLUMN_STARTED_AT < ?", arrayOf(cutoff.toString()))
+                val cutoff = System.currentTimeMillis() - LOCAL_START_TTL_MILLIS
+                database.delete(TABLE_LOCAL_STARTS, "$COLUMN_EVENT_TIMESTAMP < ?", arrayOf(cutoff.toString()))
             } finally {
                 SQLiteDatabaseHelper.closeDatabase(database)
             }
@@ -169,12 +172,13 @@ internal class NotificationHistoryDatabase internal constructor(private val data
     }
 
     /**
-     * Atomically checks whether ([notificationId], [channelId]) is in the locally-started registry
-     * and, if so, removes it. Returns `true` when an entry existed (the caller should fire the
-     * one-time localstart catch-up), `false` otherwise. The delete guarantees the catch-up fires
-     * only once even if several backend events arrive.
+     * Atomically reads and removes the locally-started registry entry for ([notificationId],
+     * [channelId]). Returns the recorded start time (epoch milliseconds) when an entry existed
+     * (the caller should fire the one-time localstart catch-up, stamped with that time), or `null`
+     * otherwise. The delete guarantees the catch-up fires only once even if several backend
+     * events arrive.
      */
-    fun consumeLocalStart(notificationId: String, channelId: String): Boolean {
+    fun consumeLocalStart(notificationId: String, channelId: String): Long? {
         synchronized(dbMutex) {
             var database: SQLiteDatabase? = null
             try {
@@ -182,12 +186,16 @@ internal class NotificationHistoryDatabase internal constructor(private val data
                     databasePath,
                     SQLiteDatabaseHelper.DatabaseOpenMode.READ_WRITE
                 )
-                val deleted = database.delete(
-                    TABLE_LOCAL_STARTS,
-                    "$COLUMN_NOTIFICATION_ID = ? AND $COLUMN_CHANNEL_ID = ?",
-                    arrayOf(notificationId, channelId)
-                )
-                return deleted > 0
+                val whereClause = "$COLUMN_NOTIFICATION_ID = ? AND $COLUMN_CHANNEL_ID = ?"
+                val whereArgs = arrayOf(notificationId, channelId)
+                val eventTimestamp = database.rawQuery(
+                    "SELECT $COLUMN_EVENT_TIMESTAMP FROM $TABLE_LOCAL_STARTS WHERE $whereClause",
+                    whereArgs
+                ).use { if (it.moveToFirst()) it.getLong(0) else null }
+                if (eventTimestamp != null) {
+                    database.delete(TABLE_LOCAL_STARTS, whereClause, whereArgs)
+                }
+                return eventTimestamp
             } finally {
                 SQLiteDatabaseHelper.closeDatabase(database)
             }
@@ -205,8 +213,8 @@ internal class NotificationHistoryDatabase internal constructor(private val data
 
         // Locally-started Live Update registry (same DB, separate table).
         private const val TABLE_LOCAL_STARTS = "local_started_live_updates"
-        private const val COLUMN_STARTED_AT = "startedAt"
-        private val LOCAL_START_TTL_SECONDS = TimeUnit.DAYS.toSeconds(28)
+        private const val COLUMN_EVENT_TIMESTAMP = "eventTimestamp"
+        private val LOCAL_START_TTL_MILLIS = TimeUnit.DAYS.toMillis(28)
 
         @Volatile
         private var instance: NotificationHistoryDatabase? = null

@@ -27,6 +27,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -103,10 +104,12 @@ class NotificationHistoryManagerRealDbTest {
         )
 
         // 1) Local start: registers for catch-up, dispatches NO tracking event.
+        val beforeLocalStartMillis = System.currentTimeMillis()
         mockStatic(MobileCore::class.java).use { m ->
             LiveUpdates.dispatchLiveUpdateEventTracking(ctx, local)
             m.verify({ MobileCore.dispatchEvent(any()) }, never())
         }
+        val afterLocalStartMillis = System.currentTimeMillis()
 
         // 2) First backend update: fires the update received AND the localstart catch-up (2 events).
         mockStatic(MobileCore::class.java).use { m ->
@@ -120,6 +123,13 @@ class NotificationHistoryManagerRealDbTest {
             // correlating the start to the campaign.
             val catchUp = captor.allValues.first { liveActivityEventOf(it) == "liveupdate_localstart" }
             assertEquals("camp-123", xdmOf(catchUp)["campaignMarker"])
+            // ...and is stamped with when the local start happened (epoch millis captured then),
+            // not with the time the catch-up fires.
+            val catchUpMillis = java.time.Instant.parse(xdmOf(catchUp)["timestamp"] as String).toEpochMilli()
+            assertTrue(catchUpMillis in beforeLocalStartMillis..afterLocalStartMillis)
+            // The regular update event keeps no explicit timestamp (Edge stamps it at send time).
+            val updateEvent = captor.allValues.first { liveActivityEventOf(it) == "liveupdate_update" }
+            assertNull(xdmOf(updateEvent)["timestamp"])
         }
 
         // 3) Second backend update for the same id+channel: catch-up already consumed -> 1 event.

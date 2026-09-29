@@ -158,10 +158,10 @@ class LiveUpdatePayload private constructor(
          *
          * @param title optional; a title-less payload still renders but will not promote to a
          * Live Update chip (the platform requires a `contentTitle` for promotion).
-         * @param timestamp epoch **seconds** (not millis), matching the backend envelope's
-         * `timestamp` field. Used as-is for staleness/regression checks in
-         * [NotificationHistoryManager]; passing millis here will be misread as a
-         * far-future/implausible timestamp.
+         * @param timestamp epoch **seconds**, matching the backend envelope's `timestamp` field.
+         * Used for staleness/regression checks in [NotificationHistoryManager]. As a guard rail,
+         * a value that is implausibly large for seconds (e.g. epoch millis) is converted to
+         * seconds rather than being misread as a far-future timestamp.
          */
         @JvmStatic
         @JvmOverloads
@@ -185,7 +185,7 @@ class LiveUpdatePayload private constructor(
             channelId = channelId,
             eventType = eventType,
             title = title,
-            timestamp = timestamp,
+            timestamp = normalizeToEpochSeconds(timestamp),
             priority = priority,
             body = body,
             criticalText = criticalText,
@@ -196,6 +196,26 @@ class LiveUpdatePayload private constructor(
             smallIcon = smallIcon,
             xdm = xdm
         )
+
+        /**
+         * Guard rail for app-built payloads: if [timestamp] is too large to be epoch seconds
+         * (epoch millis, or finer), scales it down by 1000s until it is. Values already in
+         * seconds are returned untouched.
+         */
+        private fun normalizeToEpochSeconds(timestamp: Long): Long {
+            var seconds = timestamp
+            while (seconds > MAX_PLAUSIBLE_TIMESTAMP_SECONDS) {
+                seconds /= 1000
+            }
+            if (seconds != timestamp) {
+                Log.warning(
+                    LiveUpdatesConstants.LOG_TAG,
+                    SELF_TAG,
+                    "Live Update timestamp $timestamp is not epoch seconds; converted to $seconds."
+                )
+            }
+            return seconds
+        }
 
         /** Fast detection - does this [message] carry the Live Update envelope key? */
         @JvmStatic

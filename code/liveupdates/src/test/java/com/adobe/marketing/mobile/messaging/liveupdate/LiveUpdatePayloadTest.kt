@@ -233,6 +233,30 @@ class LiveUpdatePayloadTest {
     }
 
     @Test
+    fun `create converts an epoch millis timestamp to seconds`() {
+        val payload = LiveUpdatePayload.create(
+            notificationId = "id1",
+            channelId = "chan",
+            eventType = LiveUpdatePayload.EVENT_TYPE_LOCAL_START,
+            title = "Title",
+            timestamp = 1_700_000_123_456L
+        )
+        assertEquals(1_700_000_123L, payload.timestamp)
+    }
+
+    @Test
+    fun `create leaves an epoch seconds timestamp untouched`() {
+        val payload = LiveUpdatePayload.create(
+            notificationId = "id1",
+            channelId = "chan",
+            eventType = LiveUpdatePayload.EVENT_TYPE_LOCAL_START,
+            title = "Title",
+            timestamp = 1_700_000_123L
+        )
+        assertEquals(1_700_000_123L, payload.timestamp)
+    }
+
+    @Test
     fun `create with all fields populates every property`() {
         val contentState = JSONObject().put("k", "v")
         val xdm = JSONObject().put("campaignID", "c1")

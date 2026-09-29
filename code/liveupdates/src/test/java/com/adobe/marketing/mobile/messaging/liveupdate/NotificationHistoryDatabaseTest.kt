@@ -22,6 +22,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
@@ -64,26 +65,35 @@ class NotificationHistoryDatabaseTest {
     }
 
     @Test
-    fun `consumeLocalStart returns false when no local start was recorded`() {
-        assertFalse(database.consumeLocalStart("id1", "chan1"))
+    fun `consumeLocalStart returns null when no local start was recorded`() {
+        assertNull(database.consumeLocalStart("id1", "chan1"))
     }
 
     @Test
-    fun `recordLocalStart then consumeLocalStart returns true once, then false`() {
-        val now = System.currentTimeMillis() / 1000
-        database.recordLocalStart("id1", "chan1", now)
-        assertTrue(database.consumeLocalStart("id1", "chan1"))
+    fun `recordLocalStart then consumeLocalStart returns the stored millis once, then null`() {
+        val nowMillis = System.currentTimeMillis()
+        database.recordLocalStart("id1", "chan1", nowMillis)
+        assertEquals(nowMillis, database.consumeLocalStart("id1", "chan1"))
         // Second consume: entry already removed, so the catch-up cannot fire twice.
-        assertFalse(database.consumeLocalStart("id1", "chan1"))
+        assertNull(database.consumeLocalStart("id1", "chan1"))
     }
 
     @Test
     fun `local start registry is keyed by notificationId plus channelId`() {
-        val now = System.currentTimeMillis() / 1000
-        database.recordLocalStart("id1", "chanA", now)
+        val nowMillis = System.currentTimeMillis()
+        database.recordLocalStart("id1", "chanA", nowMillis)
         // Same id, different channel is a different key.
-        assertFalse(database.consumeLocalStart("id1", "chanB"))
-        assertTrue(database.consumeLocalStart("id1", "chanA"))
+        assertNull(database.consumeLocalStart("id1", "chanB"))
+        assertEquals(nowMillis, database.consumeLocalStart("id1", "chanA"))
+    }
+
+    @Test
+    fun `recordLocalStart evicts entries older than the 28 day TTL`() {
+        val nowMillis = System.currentTimeMillis()
+        database.recordLocalStart("stale", "chan1", nowMillis - TimeUnit.DAYS.toMillis(29))
+        database.recordLocalStart("fresh", "chan1", nowMillis)
+        assertNull(database.consumeLocalStart("stale", "chan1"))
+        assertEquals(nowMillis, database.consumeLocalStart("fresh", "chan1"))
     }
 
     private fun queryTimestamp(notificationId: String, channelId: String): Long? {

@@ -19,9 +19,11 @@ import com.adobe.marketing.mobile.EventType
 import com.adobe.marketing.mobile.MobileCore
 import com.adobe.marketing.mobile.plugin.ILiveupdatePlugin
 import com.adobe.marketing.mobile.services.Log
+import com.adobe.marketing.mobile.util.TimeUtils
 import com.google.firebase.messaging.RemoteMessage
 import org.json.JSONException
 import org.json.JSONObject
+import java.util.Date
 
 /**
  * Public facade for the Live Updates SDK.
@@ -59,6 +61,7 @@ object LiveUpdates {
     // XDM schema field names - match the canonical AJO Push Tracking Experience Event Schema,
     // which is the same schema the iOS Live Activities tracking flow populates in production.
     private const val XDM_KEY_EVENT_TYPE = "eventType"
+    private const val XDM_KEY_TIMESTAMP = "timestamp"
     private const val XDM_VALUE_LIVE_UPDATE_TRACKING_RECEIVED = "liveUpdateTracking.received"
 
     // pushChannelContext.liveActivity.event values dispatched in the outbound XDM.
@@ -589,8 +592,11 @@ object LiveUpdates {
         // reported (no `_xdm` then). Retroactively emit the start as a `received` event carrying
         // THIS backend event's `_xdm` (copied) with the liveActivity.event changed to the
         // localstart value, so the backend correlates the locally-started activity to this
-        // campaign. Fire it exactly once - consumeLocalStart removes the registry entry.
-        if (NotificationHistoryManager.consumeLocalStart(payload)) {
+        // campaign. The event is stamped with the time the local start actually happened (epoch
+        // millis recorded then), not the time this catch-up fires. Fire it exactly once -
+        // consumeLocalStart removes the registry entry.
+        val localStartMillis = NotificationHistoryManager.consumeLocalStart(payload)
+        if (localStartMillis != null) {
             Log.debug(
                 LiveUpdatesConstants.LOG_TAG, SELF_TAG,
                 "Local-start catch-up for id=${payload.notificationId}: emitting a '$EVENT_VALUE_LIVE_UPDATE_LOCAL_START' " +
@@ -602,7 +608,8 @@ object LiveUpdates {
                 topicName = payload.topicName,
                 liveActivityEvent = EVENT_VALUE_LIVE_UPDATE_LOCAL_START,
                 incomingXdm = payload.xdm,
-                customActionId = null
+                customActionId = null,
+                eventTimestampMillis = localStartMillis
             )
         }
 
@@ -678,7 +685,8 @@ object LiveUpdates {
         topicName: String?,
         liveActivityEvent: String?,
         incomingXdm: JSONObject?,
-        customActionId: String?
+        customActionId: String?,
+        eventTimestampMillis: Long? = null
     ) {
         val xdmMap = buildLiveActivityTrackingXdm(
             xdmEventType = xdmEventType,
@@ -687,7 +695,13 @@ object LiveUpdates {
             liveActivityEvent = liveActivityEvent,
             incomingXdm = incomingXdm,
             customActionId = customActionId
-        )
+        ).toMutableMap()
+        // An Event's own timestamp cannot be set (it is stamped at build time), but Edge honours
+        // a pre-set XDM `timestamp`, so a deferred event carries its original time this way.
+        // Same ISO-8601 UTC millisecond format Edge itself generates.
+        eventTimestampMillis?.let {
+            xdmMap[XDM_KEY_TIMESTAMP] = TimeUtils.getISO8601UTCDateWithMilliseconds(Date(it))
+        }
         val eventData = mutableMapOf<String, Any?>(EVENT_DATA_KEY_XDM to xdmMap)
         cachedEventDatasetId?.let { datasetId ->
             eventData[EVENT_DATA_KEY_META] = mapOf<String, Any?>(
