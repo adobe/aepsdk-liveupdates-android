@@ -117,24 +117,16 @@ internal object NotificationHistoryManager {
      */
     internal fun evictExpiredAsync() {
         val now = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis())
-        try {
-            dbExecutor.submit {
-                try {
-                    NotificationHistoryDatabase.getInstance().deleteExpired(now)
-                } catch (e: Exception) {
-                    Log.warning(
-                        LiveUpdatesConstants.LOG_TAG,
-                        SELF_TAG,
-                        "NotificationHistory eviction failed: ${e.localizedMessage}"
-                    )
-                }
+        dbExecutor.submit {
+            try {
+                NotificationHistoryDatabase.getInstance().deleteExpired(now)
+            } catch (e: Exception) {
+                Log.warning(
+                    LiveUpdatesConstants.LOG_TAG,
+                    SELF_TAG,
+                    "NotificationHistory eviction failed: ${e.localizedMessage}"
+                )
             }
-        } catch (e: Exception) {
-            Log.warning(
-                LiveUpdatesConstants.LOG_TAG,
-                SELF_TAG,
-                "Could not schedule eviction: ${e.localizedMessage}"
-            )
         }
     }
 }
