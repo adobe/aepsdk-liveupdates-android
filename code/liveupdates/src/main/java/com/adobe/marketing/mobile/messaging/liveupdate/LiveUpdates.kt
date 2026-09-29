@@ -69,6 +69,11 @@ object LiveUpdates {
     private const val EVENT_VALUE_LIVE_UPDATE_START = "liveupdate_start"
     private const val EVENT_VALUE_LIVE_UPDATE_UPDATE = "liveupdate_update"
     private const val EVENT_VALUE_LIVE_UPDATE_END = "liveupdate_end"
+    // pushChannelContext.liveActivity.event value used for the retroactive "start" catch-up event
+    // that is emitted when a backend update/end arrives for a Live Update that was started locally
+    // (see dispatchLiveUpdateEventTracking). Kept as a single distinct constant so the exact
+    // reporting name can be confirmed with the backend and changed here in one line.
+    private const val EVENT_VALUE_LIVE_UPDATE_LOCAL_START = "localstart"
     // Topic subscription tracking values. Dispatched via trackTopicSubscribed /
     // trackTopicUnsubscribed after the host app completes the corresponding
     // FirebaseMessaging call.
@@ -552,6 +557,26 @@ object LiveUpdates {
      */
     internal fun dispatchLiveUpdateEventTracking(context: Context, payload: LiveUpdatePayload) {
         val eventType = payload.eventType
+
+        // Locally-triggered start ([LiveUpdates.triggerLocalLiveUpdate]): there is no backend
+        // `_xdm` yet, so there is nothing to report - do NOT dispatch a `received` tracking event.
+        // Instead register the (notificationId, channelId) so a later backend update/end can
+        // retroactively report the start, correlated to that campaign (see the catch-up below).
+        // Listener callbacks still fire (via invokeListener), independent of tracking.
+        // TODO(local-update): this only handles a locally-triggered *start*. If the app is ever
+        //   allowed to push a local *update* (event_type=update through triggerLocalLiveUpdate),
+        //   decide whether that should suppress tracking / refresh the registry rather than take
+        //   the catch-up path below (which assumes update/end come from the backend with `_xdm`).
+        if (eventType == LiveUpdatePayload.EVENT_TYPE_LOCAL_START) {
+            NotificationHistoryManager.recordLocalStart(payload)
+            Log.debug(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "Local start id=${payload.notificationId}: registered for catch-up; no tracking " +
+                    "dispatched (locally triggered, no _xdm)."
+            )
+            return
+        }
+
         if (!payload.isCanonicalEventType) {
             Log.debug(
                 LiveUpdatesConstants.LOG_TAG, SELF_TAG,
@@ -559,13 +584,33 @@ object LiveUpdates {
             )
             return
         }
-        // Map the envelope's raw event_type to the outbound XDM reporting value.
-        // The envelope stays as start / update / end (server + parser contract);
-        // the outbound XDM uses the prefixed liveupdate_* values for AJO reporting.
-        // EVENT_TYPE_LOCAL_START (app-raised locally) reports as liveupdate_start.
+
+        // Catch-up: if this (notificationId, channelId) was started locally, the start was never
+        // reported (no `_xdm` then). Retroactively emit the start as a `received` event carrying
+        // THIS backend event's `_xdm` (copied) with the liveActivity.event changed to the
+        // localstart value, so the backend correlates the locally-started activity to this
+        // campaign. Fire it exactly once - consumeLocalStart removes the registry entry.
+        if (NotificationHistoryManager.consumeLocalStart(payload)) {
+            Log.debug(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "Local-start catch-up for id=${payload.notificationId}: emitting a '$EVENT_VALUE_LIVE_UPDATE_LOCAL_START' " +
+                    "received event from the incoming $eventType's _xdm."
+            )
+            dispatchTrackingEvent(
+                xdmEventType = XDM_VALUE_LIVE_UPDATE_TRACKING_RECEIVED,
+                notificationId = payload.notificationId,
+                topicName = payload.topicName,
+                liveActivityEvent = EVENT_VALUE_LIVE_UPDATE_LOCAL_START,
+                incomingXdm = payload.xdm,
+                customActionId = null
+            )
+        }
+
+        // Map the envelope's raw event_type to the outbound XDM reporting value. The envelope
+        // stays as start / update / end (server + parser contract); the outbound XDM uses the
+        // prefixed liveupdate_* values for AJO reporting.
         val liveActivityEventXdmValue = when (eventType) {
-            LiveUpdatePayload.EVENT_TYPE_START,
-            LiveUpdatePayload.EVENT_TYPE_LOCAL_START -> EVENT_VALUE_LIVE_UPDATE_START
+            LiveUpdatePayload.EVENT_TYPE_START -> EVENT_VALUE_LIVE_UPDATE_START
             LiveUpdatePayload.EVENT_TYPE_UPDATE -> EVENT_VALUE_LIVE_UPDATE_UPDATE
             LiveUpdatePayload.EVENT_TYPE_END -> EVENT_VALUE_LIVE_UPDATE_END
             else -> return // isCanonical guard above makes this unreachable
@@ -873,7 +918,9 @@ object LiveUpdates {
         try {
             listener.onLiveUpdateReceived(payload)
             when (payload.eventType) {
-                LiveUpdatePayload.EVENT_TYPE_START -> listener.onStart(payload)
+                // A locally-triggered start is still a start from the app's perspective.
+                LiveUpdatePayload.EVENT_TYPE_START,
+                LiveUpdatePayload.EVENT_TYPE_LOCAL_START -> listener.onStart(payload)
                 LiveUpdatePayload.EVENT_TYPE_UPDATE -> listener.onUpdate(payload)
                 LiveUpdatePayload.EVENT_TYPE_END -> listener.onEnd(payload)
                 else -> {

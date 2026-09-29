@@ -60,7 +60,10 @@ import com.adobe.marketing.mobile.Assurance
 import com.adobe.marketing.mobile.Messaging
 import com.adobe.marketing.mobile.MobileCore
 import com.adobe.marketing.mobile.edge.identity.Identity
+import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload
+import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdates
 import com.google.firebase.messaging.FirebaseMessaging
+import org.json.JSONObject
 
 // Blue color scheme so the app bar / buttons render blue instead of the Material3 default purple.
 private val LiveUpdatesBlueColors = lightColorScheme(
@@ -275,6 +278,16 @@ private fun LiveUpdateInfoScreen(
                 Text("Manage FCM topics")
             }
 
+            // Starts a Live Update locally (no FCM / no backend) via the SDK's
+            // LiveUpdates.triggerLocalLiveUpdate API. The SDK renders the chip and fires the
+            // listener callbacks, but does NOT dispatch a receive tracking event (there is no
+            // backend _xdm yet). A later backend update/end for the same notification_id +
+            // channel retroactively reports the start (localstart catch-up).
+            Button(
+                onClick = { startLocalLiveUpdate(context) },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Start a local Live Update") }
+
             // Quick Connect: pairs with Assurance without a QR code / deeplink session id.
             // No-ops on non-debuggable builds or if a session is already active.
             OutlinedButton(
@@ -333,6 +346,42 @@ private fun IdentitiesCard(identities: List<IdentityRow>) {
             }
         }
     }
+}
+
+/**
+ * Demonstrates the local-start API: builds a [LiveUpdatePayload] with event_type = localstart and
+ * hands it to [LiveUpdates.triggerLocalLiveUpdate]. Uses a fixed notification_id + channel so a
+ * matching backend update/end can be sent later to exercise the localstart catch-up. The chosen id
+ * is logged (tag "LiveUpdateSample") so it can be copied into the backend campaign payload.
+ */
+private fun startLocalLiveUpdate(context: Context) {
+    val notificationId = "local_live_update_sample"
+    val channelId = "live_updates_channel"
+    val payload = LiveUpdatePayload.create(
+        notificationId = notificationId,
+        channelId = channelId,
+        eventType = LiveUpdatePayload.EVENT_TYPE_LOCAL_START,
+        title = "Local Live Update",
+        timestamp = System.currentTimeMillis() / 1000,
+        body = "Started locally from the app",
+        criticalText = "Live",
+        contentState = JSONObject().apply {
+            put("custom_key_template_type", "progress")
+            put("custom_key_journey_progress", 25)
+        }
+    )
+    val rendered = LiveUpdates.triggerLocalLiveUpdate(context, payload)
+    android.util.Log.d(
+        "LiveUpdateSample",
+        "Local Live Update triggered: id=$notificationId channel=$channelId rendered=$rendered " +
+            "(send a backend update/end to the same id+channel to see the localstart catch-up)"
+    )
+    Toast.makeText(
+        context,
+        if (rendered) "Local Live Update posted (id=$notificationId)"
+        else "Not posted - is LiveUpdatePlugin registered?",
+        Toast.LENGTH_LONG
+    ).show()
 }
 
 private fun copyToClipboard(context: Context, text: String, label: String) {

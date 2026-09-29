@@ -432,12 +432,14 @@ class LiveUpdatesTest {
     }
 
     @Test
-    fun `dispatchLiveUpdateEventTracking maps localstart to liveupdate_start`() {
+    fun `dispatchLiveUpdateEventTracking does NOT dispatch tracking for a local start`() {
+        // A locally-triggered start has no backend _xdm, so no receive tracking event is
+        // dispatched; the start is registered for a later catch-up instead (DB fails open here).
         LiveUpdates.dispatchLiveUpdateEventTracking(
             mock(Context::class.java),
             payload(eventType = LiveUpdatePayload.EVENT_TYPE_LOCAL_START)
         )
-        assertEquals("liveupdate_start", liveActivity(xdmMap(captureEvent()))["event"])
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
     }
 
     @Test

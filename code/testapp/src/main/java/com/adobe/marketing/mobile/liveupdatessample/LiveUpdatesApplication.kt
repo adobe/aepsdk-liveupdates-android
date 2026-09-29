@@ -146,6 +146,19 @@ class LiveUpdatesApplication : Application() {
                 unsubscribeFromTopic(payload)
             }
 
+            override fun onClick(payload: LiveUpdatePayload) {
+                // Opening the app / choosing the destination on a chip tap is the APP's
+                // responsibility - the SDK only fires applicationOpened tracking and this
+                // callback, it does not open the app or resolve any deep link. Here the sample
+                // simply brings its own MainActivity to the foreground. A real app can route to a
+                // specific screen using fields from the payload (notificationId, topicName, or
+                // custom keys in contentState).
+                Log.d(TAG, "Live Update CLICK: id=${payload.notificationId}; opening the app")
+                val intent = Intent(applicationContext, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                }
+                startActivity(intent)
+            }
         })
     }
 

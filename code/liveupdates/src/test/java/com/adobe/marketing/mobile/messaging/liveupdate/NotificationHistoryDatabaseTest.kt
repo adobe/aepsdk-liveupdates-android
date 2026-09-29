@@ -63,6 +63,29 @@ class NotificationHistoryDatabaseTest {
         assertEquals(5000L, queryTimestamp("new", "chan1"))
     }
 
+    @Test
+    fun `consumeLocalStart returns false when no local start was recorded`() {
+        assertFalse(database.consumeLocalStart("id1", "chan1"))
+    }
+
+    @Test
+    fun `recordLocalStart then consumeLocalStart returns true once, then false`() {
+        val now = System.currentTimeMillis() / 1000
+        database.recordLocalStart("id1", "chan1", now)
+        assertTrue(database.consumeLocalStart("id1", "chan1"))
+        // Second consume: entry already removed, so the catch-up cannot fire twice.
+        assertFalse(database.consumeLocalStart("id1", "chan1"))
+    }
+
+    @Test
+    fun `local start registry is keyed by notificationId plus channelId`() {
+        val now = System.currentTimeMillis() / 1000
+        database.recordLocalStart("id1", "chanA", now)
+        // Same id, different channel is a different key.
+        assertFalse(database.consumeLocalStart("id1", "chanB"))
+        assertTrue(database.consumeLocalStart("id1", "chanA"))
+    }
+
     private fun queryTimestamp(notificationId: String, channelId: String): Long? {
         val db = SQLiteDatabaseHelper.openDatabase(dbPath, SQLiteDatabaseHelper.DatabaseOpenMode.READ_ONLY)
         try {

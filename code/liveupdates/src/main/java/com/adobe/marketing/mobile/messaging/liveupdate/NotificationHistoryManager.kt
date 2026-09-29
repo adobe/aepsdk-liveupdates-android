@@ -78,6 +78,47 @@ internal object NotificationHistoryManager {
      * @return `true` if recorded (or the DB failed open); `false` if rejected as a
      * regression/duplicate (already logged) and should be dropped by the caller.
      */
+    /**
+     * Records that [payload] was started locally (see [LiveUpdates.triggerLocalLiveUpdate]) so a
+     * later backend update/end can retroactively report the start. Keyed by (notificationId,
+     * channelId); uses `payload.timestamp` (epoch seconds) as the start time. Best effort: runs on
+     * the DB executor and fails open (a broken DB never blocks a Live Update from rendering).
+     */
+    fun recordLocalStart(payload: LiveUpdatePayload) {
+        try {
+            dbExecutor.submit {
+                NotificationHistoryDatabase.getInstance()
+                    .recordLocalStart(payload.notificationId, payload.channelId, payload.timestamp)
+            }.get()
+        } catch (e: Exception) {
+            Log.warning(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "Failed to record local start for id=${payload.notificationId}: ${e.localizedMessage}"
+            )
+        }
+    }
+
+    /**
+     * @return `true` if [payload]'s (notificationId, channelId) was in the locally-started registry
+     * (now removed, so the localstart catch-up fires exactly once); `false` otherwise or if the DB
+     * is unavailable (fails safe: no catch-up rather than a spurious one).
+     */
+    fun consumeLocalStart(payload: LiveUpdatePayload): Boolean {
+        return try {
+            dbExecutor.submit<Boolean> {
+                NotificationHistoryDatabase.getInstance()
+                    .consumeLocalStart(payload.notificationId, payload.channelId)
+            }.get()
+        } catch (e: Exception) {
+            Log.warning(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "Local-start lookup failed for id=${payload.notificationId}; skipping catch-up: " +
+                    "${e.localizedMessage}"
+            )
+            false
+        }
+    }
+
     internal fun recordTimestamp(payload: LiveUpdatePayload): Boolean {
         val now = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis())
         return try {
