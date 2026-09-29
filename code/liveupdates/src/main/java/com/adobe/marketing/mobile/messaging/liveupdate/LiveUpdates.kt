@@ -73,7 +73,7 @@ object LiveUpdates {
     // that is emitted when a backend update/end arrives for a Live Update that was started locally
     // (see dispatchLiveUpdateEventTracking). Kept as a single distinct constant so the exact
     // reporting name can be confirmed with the backend and changed here in one line.
-    private const val EVENT_VALUE_LIVE_UPDATE_LOCAL_START = "localstart"
+    private const val EVENT_VALUE_LIVE_UPDATE_LOCAL_START = "liveupdate_localstart"
     // Topic subscription tracking values. Dispatched via trackTopicSubscribed /
     // trackTopicUnsubscribed after the host app completes the corresponding
     // FirebaseMessaging call.
@@ -136,7 +136,7 @@ object LiveUpdates {
     private const val XDM_KEY_MESSAGE_PROFILE = "messageProfile"
     private const val XDM_KEY_CHANNEL = "channel"
     private const val XDM_KEY_ID = "_id"
-    private const val XDM_VALUE_PUSH_CHANNEL_ID = "https://ns.adobe.com/xdm/channels/push"
+    private const val XDM_VALUE_LIVE_ACTIVITY_CHANNEL_ID = "https://ns.adobe.com/xdm/channels/liveactivity"
     private const val XDM_KEY_PUSH_CHANNEL_CONTEXT = "pushChannelContext"
     private const val XDM_KEY_PLATFORM = "platform"
     private const val XDM_VALUE_PLATFORM_FCM = "fcm"
@@ -541,13 +541,13 @@ object LiveUpdates {
      *   "_experience": {
      *     "customerJourneyManagement": {
      *       (passthrough from incoming _xdm: messageExecution, decisioning, etc.)
-     *       "messageProfile":      { "channel": { "_id": "https://ns.adobe.com/xdm/channels/push" } },
+     *       "messageProfile":      { "channel": { "_id": "https://ns.adobe.com/xdm/channels/liveactivity" } },
      *       "pushChannelContext":  {
      *         "platform":     "fcm",
      *         "liveActivity": {
      *           "liveActivityID": "<notification_id>",
      *           "channelID":      "<topic_name>",
-     *           "event":          "liveupdate_start" | "liveupdate_update" | "liveupdate_end"
+     *           "event":          "liveupdate_start" | "liveupdate_update" | "liveupdate_end" | "liveupdate_localstart"
      *         }
      *       }
      *     }
@@ -848,7 +848,7 @@ object LiveUpdates {
             ?: mutableMapOf()
         if (!messageProfile.containsKey(XDM_KEY_CHANNEL)) {
             messageProfile[XDM_KEY_CHANNEL] = mapOf<String, Any?>(
-                XDM_KEY_ID to XDM_VALUE_PUSH_CHANNEL_ID
+                XDM_KEY_ID to XDM_VALUE_LIVE_ACTIVITY_CHANNEL_ID
             )
         }
         cjm[XDM_KEY_MESSAGE_PROFILE] = messageProfile

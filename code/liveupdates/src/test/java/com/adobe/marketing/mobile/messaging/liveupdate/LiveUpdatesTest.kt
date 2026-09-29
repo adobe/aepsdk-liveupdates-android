@@ -482,7 +482,7 @@ class LiveUpdatesTest {
         val messageProfile = cjm(xdm)["messageProfile"] as Map<String, Any?>
         @Suppress("UNCHECKED_CAST")
         val channel = messageProfile["channel"] as Map<String, Any?>
-        assertEquals("https://ns.adobe.com/xdm/channels/push", channel["_id"])
+        assertEquals("https://ns.adobe.com/xdm/channels/liveactivity", channel["_id"])
     }
 
     @Test

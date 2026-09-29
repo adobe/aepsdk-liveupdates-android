@@ -114,11 +114,11 @@ class NotificationHistoryManagerRealDbTest {
             val captor = ArgumentCaptor.forClass(Event::class.java)
             m.verify({ MobileCore.dispatchEvent(captor.capture()) }, times(2))
             val liveActivityEvents = captor.allValues.map { liveActivityEventOf(it) }
-            assertTrue(liveActivityEvents.contains("localstart"))
+            assertTrue(liveActivityEvents.contains("liveupdate_localstart"))
             assertTrue(liveActivityEvents.contains("liveupdate_update"))
             // The catch-up carries the update's _xdm (copied, mixins flattened to root),
             // correlating the start to the campaign.
-            val catchUp = captor.allValues.first { liveActivityEventOf(it) == "localstart" }
+            val catchUp = captor.allValues.first { liveActivityEventOf(it) == "liveupdate_localstart" }
             assertEquals("camp-123", xdmOf(catchUp)["campaignMarker"])
         }
 
