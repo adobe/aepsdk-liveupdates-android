@@ -38,6 +38,32 @@ class NotificationHistoryManagerRealDbTest {
     }
 
     @Test
+    fun `evictExpiredAsync deletes expired rows and keeps live ones`() {
+        val database = NotificationHistoryDatabase.getInstance()
+        val now = System.currentTimeMillis() / 1000
+        database.recordIfNewer("evict-expired", "evict-chan", 1000L, expiresAt = now - 60)
+        database.recordIfNewer("evict-live", "evict-chan", 1000L, expiresAt = now + 60)
+
+        NotificationHistoryManager.evictExpiredAsync()
+        // recordTimestamp blocks on the same single-thread executor, so it only returns once the
+        // queued eviction has run.
+        NotificationHistoryManager.recordTimestamp(
+            LiveUpdatePayload.create(
+                notificationId = "evict-flush",
+                channelId = "evict-chan",
+                eventType = LiveUpdatePayload.EVENT_TYPE_START,
+                title = "Title",
+                timestamp = now
+            )
+        )
+
+        // Expired row is gone, so the same timestamp is accepted again as a first-time key.
+        assertTrue(database.recordIfNewer("evict-expired", "evict-chan", 1000L, expiresAt = now + 60))
+        // Live row survived, so the same timestamp is still rejected as a duplicate.
+        assertFalse(database.recordIfNewer("evict-live", "evict-chan", 1000L, expiresAt = now + 60))
+    }
+
+    @Test
     fun `recordAndValidate accepts a fresh id then rejects a duplicate delivery`() {
         val now = System.currentTimeMillis() / 1000
         val payload = LiveUpdatePayload.create(

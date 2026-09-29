@@ -39,28 +39,36 @@ class NotificationHistoryDatabaseTest {
 
     @Test
     fun `first-time key is accepted`() {
-        assertTrue(database.recordIfNewer("id1", "chan1", 100L, expiresAt = 100_000L, now = 0L))
+        assertTrue(database.recordIfNewer("id1", "chan1", 100L, expiresAt = 100_000L))
     }
 
     @Test
     fun `newer timestamp is accepted and replaces the stored value`() {
-        database.recordIfNewer("id1", "chan1", 1000L, expiresAt = 100_000L, now = 0L)
-        assertTrue(database.recordIfNewer("id1", "chan1", 2000L, expiresAt = 100_000L, now = 0L))
+        database.recordIfNewer("id1", "chan1", 1000L, expiresAt = 100_000L)
+        assertTrue(database.recordIfNewer("id1", "chan1", 2000L, expiresAt = 100_000L))
         assertEquals(2000L, queryTimestamp("id1", "chan1"))
     }
 
     @Test
     fun `equal timestamp is rejected as a duplicate`() {
-        database.recordIfNewer("id1", "chan1", 1000L, expiresAt = 100_000L, now = 0L)
-        assertFalse(database.recordIfNewer("id1", "chan1", 1000L, expiresAt = 100_000L, now = 0L))
+        database.recordIfNewer("id1", "chan1", 1000L, expiresAt = 100_000L)
+        assertFalse(database.recordIfNewer("id1", "chan1", 1000L, expiresAt = 100_000L))
     }
 
     @Test
-    fun `eviction removes rows older than now on the next accepted write`() {
-        database.recordIfNewer("old", "chan1", 1000L, expiresAt = 1500L, now = 0L)
-        database.recordIfNewer("new", "chan1", 5000L, expiresAt = 6000L, now = 2000L)
+    fun `deleteExpired removes only rows expiring before now`() {
+        database.recordIfNewer("old", "chan1", 1000L, expiresAt = 1500L)
+        database.recordIfNewer("new", "chan1", 5000L, expiresAt = 6000L)
+        assertEquals(1, database.deleteExpired(now = 2000L))
         assertNull(queryTimestamp("old", "chan1"))
         assertEquals(5000L, queryTimestamp("new", "chan1"))
+    }
+
+    @Test
+    fun `recordIfNewer no longer evicts expired rows`() {
+        database.recordIfNewer("old", "chan1", 1000L, expiresAt = 1500L)
+        database.recordIfNewer("new", "chan1", 5000L, expiresAt = 6000L)
+        assertEquals(1000L, queryTimestamp("old", "chan1"))
     }
 
     private fun queryTimestamp(notificationId: String, channelId: String): Long? {
