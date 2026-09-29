@@ -204,11 +204,12 @@ class LiveUpdatePlugin(
         }
 
         notificationManager.notify(payload.notificationId.hashCode(), notification)
-
         // Live Update event tracking dispatch + listener invocation. Both no-op gracefully
         // if event_type is non-canonical (logged inside the helpers); listener can be null.
         LiveUpdates.dispatchLiveUpdateEventTracking(context, payload)
         LiveUpdates.invokeListener(payload)
+
+        NotificationHistoryManager.evictExpiredAsync()
     }
 
     /**

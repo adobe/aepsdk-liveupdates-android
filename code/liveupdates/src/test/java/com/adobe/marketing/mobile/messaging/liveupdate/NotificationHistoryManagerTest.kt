@@ -68,6 +68,22 @@ class NotificationHistoryManagerTest {
     }
 
     @Test
+    fun `evictExpiredAsync swallows a database failure and leaves the executor usable`() {
+        // No app context here, so NotificationHistoryDatabase.getInstance() throws inside the task.
+        NotificationHistoryManager.evictExpiredAsync()
+
+        val payload = LiveUpdatePayload.create(
+            notificationId = "id5",
+            channelId = "chan5",
+            eventType = LiveUpdatePayload.EVENT_TYPE_START,
+            title = "Title",
+            timestamp = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis())
+        )
+        // Runs after the failed eviction on the same executor and still fails open.
+        assertTrue(NotificationHistoryManager.recordTimestamp(payload))
+    }
+
+    @Test
     fun `recordAndValidate short-circuits on a stale timestamp without recording it`() {
         val staleTimestamp = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis()) -
             TimeUnit.DAYS.toSeconds(29)
