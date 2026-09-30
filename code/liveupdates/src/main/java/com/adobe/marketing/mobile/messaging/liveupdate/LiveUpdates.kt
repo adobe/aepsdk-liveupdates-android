@@ -48,7 +48,7 @@ import java.util.Date
 object LiveUpdates {
 
     private const val SELF_TAG = "LiveUpdates"
-    private const val VERSION = "0.0.1"
+    private const val VERSION = "3.0.0"
 
     // Event dispatch constants.
     private const val EVENT_NAME_LIVE_UPDATE_TRACKING = "Live Update Event Tracking"
