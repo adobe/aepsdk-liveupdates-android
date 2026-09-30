@@ -70,13 +70,6 @@ class LiveUpdatesApplication : Application() {
             // Primary identity demonstration. AJO uses this to correlate server-side
             // reporting and inbound campaigns. Replace the placeholder address with the
             // identifier your app authenticates the user with.
-            val identityMap = IdentityMap().apply {
-                addItem(
-                    IdentityItem("cuc_liveupdate@adobe.com", AuthenticatedState.AUTHENTICATED, true),
-                    "Email"
-                )
-            }
-            Identity.updateIdentities(identityMap)
         }
         MobileCore.addPlugins(LiveUpdatePlugin(SampleLiveUpdateStyleProvider(applicationContext)))
         if(ASSURANCE_SESSION_URL.isNotEmpty())
@@ -111,7 +104,6 @@ class LiveUpdatesApplication : Application() {
                         if (task.isSuccessful) {
                             // Pass the full payload so the subscribe event correlates to the
                             // originating campaign / journey via the push's _xdm.
-                            LiveUpdates.trackTopicSubscribed(topic, payload)
                             LiveUpdates.trackTopicSubscribed(payload)
                             Log.d(TAG, "Subscribed to topic '$topic' (triggered by Live Update start).")
                         } else {
@@ -168,7 +160,6 @@ class LiveUpdatesApplication : Application() {
                 if (task.isSuccessful) {
                     // Pass the full payload so the unsubscribe event correlates to the
                     // originating campaign / journey via the push's _xdm.
-                    LiveUpdates.trackTopicUnsubscribed(topic, payload)
                     LiveUpdates.trackTopicUnsubscribed(payload)
                     Log.d(TAG, "Unsubscribed from topic '$topic' (triggered by Live Update end).")
                 } else {
