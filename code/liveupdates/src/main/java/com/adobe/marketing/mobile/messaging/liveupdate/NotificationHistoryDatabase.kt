@@ -66,7 +66,8 @@ internal class NotificationHistoryDatabase internal constructor(private val data
     /**
      * Checks [newTimestamp] against the last stored value for this (notificationId, channelId)
      * key and, if it is strictly newer, upserts it (along with [expiresAt], precomputed by the
-     * caller as `newTimestamp + TTL`) and evicts rows whose stored `expiresAt` is before [now].
+     * caller as `newTimestamp + TTL`). Expired-row eviction is handled separately by
+     * [deleteExpired] so it stays off the render path.
      *
      * @return `true` if [newTimestamp] was accepted and recorded; `false` if it was rejected -
      * either older than, or exactly equal to (a duplicate delivery), the last stored timestamp.
@@ -75,8 +76,7 @@ internal class NotificationHistoryDatabase internal constructor(private val data
         notificationId: String,
         channelId: String,
         newTimestamp: Long,
-        expiresAt: Long,
-        now: Long
+        expiresAt: Long
     ): Boolean {
         synchronized(dbMutex) {
             var database: SQLiteDatabase? = null
@@ -103,9 +103,26 @@ internal class NotificationHistoryDatabase internal constructor(private val data
                     contentValues,
                     SQLiteDatabase.CONFLICT_REPLACE
                 )
-
-                database.delete(TABLE_NAME, "$COLUMN_EXPIRES_AT < ?", arrayOf(now.toString()))
                 return true
+            } finally {
+                SQLiteDatabaseHelper.closeDatabase(database)
+            }
+        }
+    }
+
+    fun deleteExpired(now: Long): Int {
+        synchronized(dbMutex) {
+            var database: SQLiteDatabase? = null
+            try {
+                database = SQLiteDatabaseHelper.openDatabase(
+                    databasePath,
+                    SQLiteDatabaseHelper.DatabaseOpenMode.READ_WRITE
+                )
+                return database.delete(
+                    TABLE_NAME,
+                    "$COLUMN_EXPIRES_AT < ?",
+                    arrayOf(now.toString())
+                )
             } finally {
                 SQLiteDatabaseHelper.closeDatabase(database)
             }
