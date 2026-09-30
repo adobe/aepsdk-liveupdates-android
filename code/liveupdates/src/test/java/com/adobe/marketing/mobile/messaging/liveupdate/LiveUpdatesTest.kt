@@ -181,10 +181,32 @@ class LiveUpdatesTest {
         val calls = mutableListOf<String>()
         LiveUpdates.setLiveUpdateListener(recordingListener(calls))
         val p = payload(eventType = LiveUpdatePayload.EVENT_TYPE_START)
+        val message = remoteMessageForEnvelope(p.toEnvelopeJson(), defaultXdm().toString())
+        LiveUpdates.trackLiveUpdateEvent(mock(Context::class.java), message)
+        assertEquals("liveupdate_start", liveActivity(xdmMap(captureEvent()))["event"])
+        assertEquals(listOf("received", "start"), calls)
+    }
+
+    @Test
+    fun `trackLiveUpdateEvent without _xdm dispatches nothing but still invokes listener`() {
+        val calls = mutableListOf<String>()
+        LiveUpdates.setLiveUpdateListener(recordingListener(calls))
+        val p = payload(eventType = LiveUpdatePayload.EVENT_TYPE_START, xdm = null)
         val message = remoteMessageForEnvelope(p.toEnvelopeJson())
         LiveUpdates.trackLiveUpdateEvent(mock(Context::class.java), message)
-        captureEvent()
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
         assertEquals(listOf("received", "start"), calls)
+    }
+
+    @Test
+    fun `trackLiveUpdateEvent with malformed _xdm dispatches nothing but still invokes listener`() {
+        val calls = mutableListOf<String>()
+        LiveUpdates.setLiveUpdateListener(recordingListener(calls))
+        val p = payload(eventType = LiveUpdatePayload.EVENT_TYPE_UPDATE, xdm = null)
+        val message = remoteMessageForEnvelope(p.toEnvelopeJson(), "{not-json")
+        LiveUpdates.trackLiveUpdateEvent(mock(Context::class.java), message)
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
+        assertEquals(listOf("received", "update"), calls)
     }
 
     // =====================================================================
@@ -287,12 +309,15 @@ class LiveUpdatesTest {
         val intent = mock(Intent::class.java)
         `when`(intent.getStringExtra(LiveUpdates.EXTRA_NOTIFICATION_ID)).thenReturn("id1")
         `when`(intent.getStringExtra(LiveUpdates.EXTRA_CHANNEL_ID)).thenReturn("topicA")
+        `when`(intent.getStringExtra(LiveUpdates.EXTRA_XDM)).thenReturn(defaultXdm().toString())
 
         val result = LiveUpdates.handleNotificationResponse(intent, true)
 
         assertTrue(result)
         val xdm = xdmMap(captureEvent())
         assertEquals("liveUpdateTracking.applicationOpened", xdm["eventType"])
+        assertEquals("camp-default", xdm["campaignID"])
+        assertEquals("topicA", liveActivity(xdm)["channelID"])
         assertNull(liveActivity(xdm)["event"])
     }
 
@@ -300,6 +325,7 @@ class LiveUpdatesTest {
     fun `handleNotificationResponse dispatches customAction tracking for action button or dismiss`() {
         val intent = mock(Intent::class.java)
         `when`(intent.getStringExtra(LiveUpdates.EXTRA_NOTIFICATION_ID)).thenReturn("id1")
+        `when`(intent.getStringExtra(LiveUpdates.EXTRA_XDM)).thenReturn(defaultXdm().toString())
 
         val result = LiveUpdates.handleNotificationResponse(intent, false, "Dismiss")
 
@@ -312,13 +338,52 @@ class LiveUpdatesTest {
     }
 
     @Test
-    fun `handleNotificationResponse tolerates malformed xdm extra`() {
-        val intent = mock(Intent::class.java)
-        `when`(intent.getStringExtra(LiveUpdates.EXTRA_NOTIFICATION_ID)).thenReturn("id1")
-        `when`(intent.getStringExtra(LiveUpdates.EXTRA_XDM)).thenReturn("{not-json")
+    fun `handleNotificationResponse tap returns true but dispatches nothing when xdm extra missing`() {
+        assertInteractionSkipped(xdmExtra = null, applicationOpened = true, customActionId = null)
+    }
 
-        assertTrue(LiveUpdates.handleNotificationResponse(intent, true))
-        captureEvent()
+    @Test
+    fun `handleNotificationResponse tap returns true but dispatches nothing when xdm extra empty`() {
+        assertInteractionSkipped(xdmExtra = "", applicationOpened = true, customActionId = null)
+    }
+
+    @Test
+    fun `handleNotificationResponse tap returns true but dispatches nothing when xdm extra malformed`() {
+        assertInteractionSkipped(xdmExtra = "{not-json", applicationOpened = true, customActionId = null)
+    }
+
+    @Test
+    fun `handleNotificationResponse customAction returns true but dispatches nothing when xdm extra missing`() {
+        assertInteractionSkipped(xdmExtra = null, applicationOpened = false, customActionId = "Dismiss")
+    }
+
+    @Test
+    fun `handleNotificationResponse customAction returns true but dispatches nothing when xdm extra empty`() {
+        assertInteractionSkipped(xdmExtra = "", applicationOpened = false, customActionId = "Dismiss")
+    }
+
+    @Test
+    fun `handleNotificationResponse customAction returns true but dispatches nothing when xdm extra malformed`() {
+        assertInteractionSkipped(xdmExtra = "{not-json", applicationOpened = false, customActionId = "Dismiss")
+    }
+
+    @Test
+    fun `dispatchInteractionTracking with null xdm dispatches nothing`() {
+        LiveUpdates.dispatchInteractionTracking(
+            notificationId = "id1",
+            topicName = "topicA",
+            incomingXdm = null,
+            applicationOpened = true,
+            customActionId = null
+        )
+        LiveUpdates.dispatchInteractionTracking(
+            notificationId = "id1",
+            topicName = "topicA",
+            incomingXdm = null,
+            applicationOpened = false,
+            customActionId = "Dismiss"
+        )
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
     }
 
     @Test
@@ -326,10 +391,48 @@ class LiveUpdatesTest {
         LiveUpdates.dispatchInteractionTracking(
             notificationId = "id1",
             topicName = null,
-            incomingXdm = null,
+            incomingXdm = defaultXdm(),
             applicationOpened = false,
             customActionId = null
         )
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
+    }
+
+    // =====================================================================
+    // Topic subscription tracking
+    // =====================================================================
+
+    @Test
+    fun `trackTopicSubscribed dispatches topic tracking when payload has xdm`() {
+        LiveUpdates.trackTopicSubscribed(payload(topicName = "topicA", notificationId = "notifT"))
+        val xdm = xdmMap(captureEvent())
+        assertEquals("liveUpdateTracking.topic", xdm["eventType"])
+        assertEquals("camp-default", xdm["campaignID"])
+        val la = liveActivity(xdm)
+        assertEquals("topic_subscribed", la["event"])
+        assertEquals("topicA", la["channelID"])
+        assertEquals("notifT", la["liveActivityID"])
+    }
+
+    @Test
+    fun `trackTopicUnsubscribed dispatches topic tracking when payload has xdm`() {
+        LiveUpdates.trackTopicUnsubscribed(payload(topicName = "topicA"))
+        val xdm = xdmMap(captureEvent())
+        assertEquals("liveUpdateTracking.topic", xdm["eventType"])
+        assertEquals("topic_unsubscribed", liveActivity(xdm)["event"])
+    }
+
+    @Test
+    fun `trackTopicSubscribed and trackTopicUnsubscribed skip dispatch when xdm is null`() {
+        LiveUpdates.trackTopicSubscribed(payload(topicName = "topicA", xdm = null))
+        LiveUpdates.trackTopicUnsubscribed(payload(topicName = "topicA", xdm = null))
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
+    }
+
+    @Test
+    fun `trackTopicSubscribed and trackTopicUnsubscribed skip dispatch when topic is empty`() {
+        LiveUpdates.trackTopicSubscribed(payload(topicName = null))
+        LiveUpdates.trackTopicUnsubscribed(payload(topicName = ""))
         mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
     }
 
@@ -374,6 +477,21 @@ class LiveUpdatesTest {
             payload(eventType = LiveUpdatePayload.EVENT_TYPE_UPDATE)
         )
         assertEquals("liveupdate_update", liveActivity(xdmMap(captureEvent()))["event"])
+    }
+
+    @Test
+    fun `dispatchLiveUpdateEventTracking skips dispatch for start, update and end with null xdm`() {
+        listOf(
+            LiveUpdatePayload.EVENT_TYPE_START,
+            LiveUpdatePayload.EVENT_TYPE_UPDATE,
+            LiveUpdatePayload.EVENT_TYPE_END
+        ).forEach { eventType ->
+            LiveUpdates.dispatchLiveUpdateEventTracking(
+                mock(Context::class.java),
+                payload(eventType = eventType, topicName = "topicA", xdm = null)
+            )
+        }
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
     }
 
     @Test
@@ -648,6 +766,16 @@ class LiveUpdatesTest {
     // Test helpers
     // =====================================================================
 
+    private fun assertInteractionSkipped(xdmExtra: String?, applicationOpened: Boolean, customActionId: String?) {
+        val intent = mock(Intent::class.java)
+        `when`(intent.getStringExtra(LiveUpdates.EXTRA_NOTIFICATION_ID)).thenReturn("id1")
+        `when`(intent.getStringExtra(LiveUpdates.EXTRA_CHANNEL_ID)).thenReturn("topicA")
+        `when`(intent.getStringExtra(LiveUpdates.EXTRA_XDM)).thenReturn(xdmExtra)
+
+        assertTrue(LiveUpdates.handleNotificationResponse(intent, applicationOpened, customActionId))
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
+    }
+
     private fun interceptorReturning(result: Boolean): ILiveUpdateInterceptor =
         object : ILiveUpdateInterceptor {
             override fun shouldDisplayLiveUpdate(payload: LiveUpdatePayload) = result
@@ -674,7 +802,7 @@ class LiveUpdatesTest {
     private fun payload(
         eventType: String = LiveUpdatePayload.EVENT_TYPE_START,
         topicName: String? = null,
-        xdm: JSONObject? = null,
+        xdm: JSONObject? = defaultXdm(),
         notificationId: String = "notif-default"
     ): LiveUpdatePayload = LiveUpdatePayload.create(
         notificationId = notificationId,
@@ -685,6 +813,9 @@ class LiveUpdatesTest {
         topicName = topicName,
         xdm = xdm
     )
+
+    private fun defaultXdm(): JSONObject =
+        JSONObject().put("mixins", JSONObject().put("campaignID", "camp-default"))
 
     private fun remoteMessageForEnvelope(envelopeJson: String, xdmRaw: String? = null): RemoteMessage {
         val message = mock(RemoteMessage::class.java)

@@ -51,6 +51,7 @@ public class JvmOverloadsCoverageTest {
 	public void handleNotificationResponse_javaOverload_withoutCustomActionId() {
 		Intent intent = Mockito.mock(Intent.class);
 		Mockito.when(intent.getStringExtra(LiveUpdates.EXTRA_NOTIFICATION_ID)).thenReturn("id1");
+		Mockito.when(intent.getStringExtra(LiveUpdates.EXTRA_XDM)).thenReturn("{\"campaignID\":\"camp1\"}");
 		try (MockedStatic<MobileCore> mobileCore = mockStatic(MobileCore.class)) {
 			LiveUpdates.handleNotificationResponse(intent, true);
 			mobileCore.verify(() -> MobileCore.dispatchEvent(any()));

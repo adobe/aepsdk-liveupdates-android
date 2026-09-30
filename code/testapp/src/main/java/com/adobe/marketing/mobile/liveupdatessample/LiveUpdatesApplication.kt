@@ -12,6 +12,7 @@
 package com.adobe.marketing.mobile.liveupdatessample
 
 import android.app.Application
+import android.content.Intent
 import android.util.Log
 import com.adobe.marketing.mobile.Assurance
 import com.adobe.marketing.mobile.Edge
@@ -19,10 +20,7 @@ import com.adobe.marketing.mobile.Lifecycle
 import com.adobe.marketing.mobile.LoggingMode
 import com.adobe.marketing.mobile.Messaging
 import com.adobe.marketing.mobile.MobileCore
-import com.adobe.marketing.mobile.edge.identity.AuthenticatedState
 import com.adobe.marketing.mobile.edge.identity.Identity
-import com.adobe.marketing.mobile.edge.identity.IdentityItem
-import com.adobe.marketing.mobile.edge.identity.IdentityMap
 import com.adobe.marketing.mobile.messaging.liveupdate.ILiveUpdateListener
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePlugin
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload
@@ -37,6 +35,7 @@ class LiveUpdatesApplication : Application() {
 
     // Fill in with your own Assurance session URL (from Assurance > Create Session) to
     // debug this sample app with Assurance.
+    private val ASSURANCE_SESSION_URL = ""
 
     private val STAGING = true
 

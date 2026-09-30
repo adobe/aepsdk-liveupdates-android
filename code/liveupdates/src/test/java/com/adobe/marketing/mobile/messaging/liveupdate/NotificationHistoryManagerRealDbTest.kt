@@ -166,6 +166,49 @@ class NotificationHistoryManagerRealDbTest {
     }
 
     @Test
+    fun `backend event without xdm dispatches nothing and preserves the local start catch-up`() {
+        val ctx = RuntimeEnvironment.getApplication()
+        val now = System.currentTimeMillis() / 1000
+        val local = LiveUpdatePayload.create(
+            notificationId = "noxdm-id", channelId = "noxdm-chan",
+            eventType = LiveUpdatePayload.EVENT_TYPE_LOCAL_START, title = "Local", timestamp = now
+        )
+        val updateWithoutXdm = LiveUpdatePayload.create(
+            notificationId = "noxdm-id", channelId = "noxdm-chan",
+            eventType = LiveUpdatePayload.EVENT_TYPE_UPDATE, title = "Update", timestamp = now + 10
+        )
+        val updateWithXdm = LiveUpdatePayload.create(
+            notificationId = "noxdm-id", channelId = "noxdm-chan",
+            eventType = LiveUpdatePayload.EVENT_TYPE_UPDATE, title = "Update", timestamp = now + 20,
+            xdm = JSONObject().put("mixins", JSONObject().put("campaignMarker", "camp-noxdm"))
+        )
+
+        // 1) Local start: registers for catch-up, no tracking.
+        mockStatic(MobileCore::class.java).use { m ->
+            LiveUpdates.dispatchLiveUpdateEventTracking(ctx, local)
+            m.verify({ MobileCore.dispatchEvent(any()) }, never())
+        }
+
+        // 2) Backend update WITHOUT _xdm: nothing dispatched, and the catch-up entry is NOT consumed.
+        mockStatic(MobileCore::class.java).use { m ->
+            LiveUpdates.dispatchLiveUpdateEventTracking(ctx, updateWithoutXdm)
+            m.verify({ MobileCore.dispatchEvent(any()) }, never())
+        }
+
+        // 3) Backend update WITH _xdm: the preserved catch-up AND the update are both dispatched.
+        mockStatic(MobileCore::class.java).use { m ->
+            LiveUpdates.dispatchLiveUpdateEventTracking(ctx, updateWithXdm)
+            val captor = ArgumentCaptor.forClass(Event::class.java)
+            m.verify({ MobileCore.dispatchEvent(captor.capture()) }, times(2))
+            val events = captor.allValues.map { liveActivityEventOf(it) }
+            assertEquals(1, events.count { it == "liveupdate_localstart" })
+            assertEquals(1, events.count { it == "liveupdate_update" })
+            val catchUp = captor.allValues.first { liveActivityEventOf(it) == "liveupdate_localstart" }
+            assertEquals("camp-noxdm", xdmOf(catchUp)["campaignMarker"])
+        }
+    }
+
+    @Test
     fun `two local starts then one backend event fire a single localstart catch-up`() {
         val ctx = RuntimeEnvironment.getApplication()
         val now = System.currentTimeMillis() / 1000

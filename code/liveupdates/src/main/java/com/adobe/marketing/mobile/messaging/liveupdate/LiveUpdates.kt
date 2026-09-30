@@ -349,7 +349,8 @@ object LiveUpdates {
     /**
      * Dispatches a Live Update interaction tracking event. Reads the extras placed on
      * [intent] by [addPushTrackingDetails] and fires a tap / action-button / dismiss event
-     * to Edge. No-op when the intent carries no Live Update tracking extras.
+     * to Edge. No-op when the intent carries no Live Update tracking extras, and no event is
+     * dispatched when the `_xdm` extra is missing, empty, or malformed.
      *
      * Called by the SDK's own tracker Activity (for tap and action-button clicks) and its
      * dismiss receiver. Manual-mode apps that own their target Activity should also call
@@ -360,8 +361,10 @@ object LiveUpdates {
      *                          action-button clicks and dismissals
      * @param customActionId    non-null for action-button clicks (button label) or dismissal
      *                          ([ACTION_ID_DISMISS]); `null` for a plain tap
-     * @return `true` if a tracking event was dispatched; `false` if the intent carried no
-     *         Live Update extras
+     * @return `true` whenever [intent] is a Live Update interaction intent (carries a non-empty
+     *         notification id extra) - even if tracking is skipped because the `_xdm` extra is
+     *         missing, empty, or malformed; `false` only if [intent] is null or carries no
+     *         Live Update notification id (not a Live Update intent)
      */
     @JvmStatic
     @JvmOverloads
@@ -447,7 +450,8 @@ object LiveUpdates {
      * the outbound Edge event with the same lifecycle-XDM shape used for start / update /
      * end, but with the [event] value driving `pushChannelContext.liveActivity.event`.
      * [incomingXdm] carries the originating push's `_xdm` passthrough (campaign / journey
-     * correlation mixins) for Live-Update-triggered calls; `null` for standalone subscribes.
+     * correlation mixins). Skips dispatch (with a debug log) when [topic] is empty or
+     * [incomingXdm] is `null` - without `_xdm` there is nothing to correlate the event to.
      */
     private fun dispatchTopicTracking(
         topic: String,
@@ -462,6 +466,15 @@ object LiveUpdates {
             )
             return
         }
+
+        if (incomingXdm == null) {
+            Log.debug(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "Skipping topic tracking dispatch: xdm is null (event='$event')."
+            )
+            return
+        }
+
         dispatchTrackingEvent(
             xdmEventType = XDM_VALUE_LIVE_UPDATE_TRACKING_TOPIC,
             notificationId = notificationId,
@@ -536,6 +549,17 @@ object LiveUpdates {
             return
         }
 
+        // No backend `_xdm` means nothing to correlate the event to, so skip it. This check is
+        // intentionally BEFORE consumeLocalStart so a pending local-start catch-up entry is
+        // preserved for a later backend event that does carry `_xdm`.
+        if (payload.xdm == null) {
+            Log.debug(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "Skipping Live Update event tracking dispatch: xdm is null (event_type='$eventType')."
+            )
+            return
+        }
+
         // Catch-up: if this (notificationId, channelId) was started locally, the start was never
         // reported (no `_xdm` then). Retroactively emit the start as a `received` event carrying
         // THIS backend event's `_xdm` (copied) with the liveActivity.event changed to the
@@ -593,6 +617,9 @@ object LiveUpdates {
      * Interaction events omit `pushChannelContext.liveActivity.event`; only the lifecycle
      * receive dispatch fills that field. Otherwise a tap or dismiss occurring during the
      * `start` push would be double-counted against the "start" phase in AJO reporting.
+     *
+     * Skips dispatch (with a debug log) when [incomingXdm] is `null` (the `_xdm` extra was
+     * missing, empty, or malformed): without `_xdm` there is nothing to correlate the event to.
      */
     internal fun dispatchInteractionTracking(
         notificationId: String,
@@ -611,6 +638,13 @@ object LiveUpdates {
                 )
                 return
             }
+        }
+        if (incomingXdm == null) {
+            Log.debug(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "Skipping interaction tracking dispatch: xdm is null (eventType='$xdmEventType')."
+            )
+            return
         }
         dispatchTrackingEvent(
             xdmEventType = xdmEventType,
