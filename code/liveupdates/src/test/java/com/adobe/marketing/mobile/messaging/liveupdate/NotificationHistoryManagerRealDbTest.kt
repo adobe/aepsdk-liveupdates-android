@@ -11,14 +11,23 @@
 
 package com.adobe.marketing.mobile.messaging.liveupdate
 
+import com.adobe.marketing.mobile.Event
 import com.adobe.marketing.mobile.MobileCore
+import org.json.JSONObject
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.mockito.ArgumentCaptor
+import org.mockito.ArgumentMatchers.any
+import org.mockito.Mockito.mockStatic
+import org.mockito.Mockito.never
+import org.mockito.Mockito.times
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -36,6 +45,32 @@ class NotificationHistoryManagerRealDbTest {
     }
 
     @Test
+    fun `evictExpiredAsync deletes expired rows and keeps live ones`() {
+        val database = NotificationHistoryDatabase.getInstance()
+        val now = System.currentTimeMillis() / 1000
+        database.recordIfNewer("evict-expired", "evict-chan", 1000L, expiresAt = now - 60)
+        database.recordIfNewer("evict-live", "evict-chan", 1000L, expiresAt = now + 60)
+
+        NotificationHistoryManager.evictExpiredAsync()
+        // recordTimestamp blocks on the same single-thread executor, so it only returns once the
+        // queued eviction has run.
+        NotificationHistoryManager.recordTimestamp(
+            LiveUpdatePayload.create(
+                notificationId = "evict-flush",
+                channelId = "evict-chan",
+                eventType = LiveUpdatePayload.EVENT_TYPE_START,
+                title = "Title",
+                timestamp = now
+            )
+        )
+
+        // Expired row is gone, so the same timestamp is accepted again as a first-time key.
+        assertTrue(database.recordIfNewer("evict-expired", "evict-chan", 1000L, expiresAt = now + 60))
+        // Live row survived, so the same timestamp is still rejected as a duplicate.
+        assertFalse(database.recordIfNewer("evict-live", "evict-chan", 1000L, expiresAt = now + 60))
+    }
+
+    @Test
     fun `recordAndValidate accepts a fresh id then rejects a duplicate delivery`() {
         val now = System.currentTimeMillis() / 1000
         val payload = LiveUpdatePayload.create(
@@ -48,5 +83,98 @@ class NotificationHistoryManagerRealDbTest {
 
         assertTrue(NotificationHistoryManager.recordAndValidate(payload))
         assertFalse(NotificationHistoryManager.recordAndValidate(payload))
+    }
+
+    @Test
+    fun `recordAndValidate rejects an out-of-order update and reports outdated_timestamp`() {
+        val now = System.currentTimeMillis() / 1000
+        val newer = LiveUpdatePayload.create(
+            notificationId = "ooo-id",
+            channelId = "ooo-chan",
+            eventType = LiveUpdatePayload.EVENT_TYPE_START,
+            title = "Title",
+            timestamp = now
+        )
+        val older = LiveUpdatePayload.create(
+            notificationId = "ooo-id",
+            channelId = "ooo-chan",
+            eventType = LiveUpdatePayload.EVENT_TYPE_UPDATE,
+            title = "Title",
+            timestamp = now - 100
+        )
+
+        // First (newer) delivery is recorded; no error dispatched.
+        assertTrue(NotificationHistoryManager.recordAndValidate(newer))
+
+        // The older, out-of-order delivery is rejected and reports the outdated_timestamp error.
+        // The app context set in setUp() already populated ServiceProvider, so the real DB keeps
+        // working while MobileCore is mocked here to capture the dispatch.
+        mockStatic(MobileCore::class.java).use { mobileCoreMock ->
+            assertFalse(NotificationHistoryManager.recordAndValidate(older))
+            mobileCoreMock.verify { MobileCore.dispatchEvent(any()) }
+        }
+    }
+
+    @Test
+    fun `local start is caught up on the next backend event exactly once`() {
+        val ctx = RuntimeEnvironment.getApplication()
+        val now = System.currentTimeMillis() / 1000
+        val local = LiveUpdatePayload.create(
+            notificationId = "lc-id", channelId = "lc-chan",
+            eventType = LiveUpdatePayload.EVENT_TYPE_LOCAL_START, title = "Local", timestamp = now
+        )
+        val update = LiveUpdatePayload.create(
+            notificationId = "lc-id", channelId = "lc-chan",
+            eventType = LiveUpdatePayload.EVENT_TYPE_UPDATE, title = "Update", timestamp = now + 10,
+            xdm = JSONObject().put("mixins", JSONObject().put("campaignMarker", "camp-123"))
+        )
+
+        // 1) Local start: registers for catch-up, dispatches NO tracking event.
+        val beforeLocalStartMillis = System.currentTimeMillis()
+        mockStatic(MobileCore::class.java).use { m ->
+            LiveUpdates.dispatchLiveUpdateEventTracking(ctx, local)
+            m.verify({ MobileCore.dispatchEvent(any()) }, never())
+        }
+        val afterLocalStartMillis = System.currentTimeMillis()
+
+        // 2) First backend update: fires the update received AND the localstart catch-up (2 events).
+        mockStatic(MobileCore::class.java).use { m ->
+            LiveUpdates.dispatchLiveUpdateEventTracking(ctx, update)
+            val captor = ArgumentCaptor.forClass(Event::class.java)
+            m.verify({ MobileCore.dispatchEvent(captor.capture()) }, times(2))
+            val liveActivityEvents = captor.allValues.map { liveActivityEventOf(it) }
+            assertTrue(liveActivityEvents.contains("liveupdate_localstart"))
+            assertTrue(liveActivityEvents.contains("liveupdate_update"))
+            // The catch-up carries the update's _xdm (copied, mixins flattened to root),
+            // correlating the start to the campaign.
+            val catchUp = captor.allValues.first { liveActivityEventOf(it) == "liveupdate_localstart" }
+            assertEquals("camp-123", xdmOf(catchUp)["campaignMarker"])
+            // ...and is stamped with when the local start happened (epoch millis captured then),
+            // not with the time the catch-up fires.
+            val catchUpMillis = java.time.Instant.parse(xdmOf(catchUp)["timestamp"] as String).toEpochMilli()
+            assertTrue(catchUpMillis in beforeLocalStartMillis..afterLocalStartMillis)
+            // The regular update event keeps no explicit timestamp (Edge stamps it at send time).
+            val updateEvent = captor.allValues.first { liveActivityEventOf(it) == "liveupdate_update" }
+            assertNull(xdmOf(updateEvent)["timestamp"])
+        }
+
+        // 3) Second backend update for the same id+channel: catch-up already consumed -> 1 event.
+        mockStatic(MobileCore::class.java).use { m ->
+            LiveUpdates.dispatchLiveUpdateEventTracking(ctx, update)
+            m.verify({ MobileCore.dispatchEvent(any()) }, times(1))
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun xdmOf(event: Event): Map<String, Any?> =
+        event.eventData!!["xdm"] as Map<String, Any?>
+
+    @Suppress("UNCHECKED_CAST")
+    private fun liveActivityEventOf(event: Event): String? {
+        val exp = xdmOf(event)["_experience"] as? Map<String, Any?> ?: return null
+        val cjm = exp["customerJourneyManagement"] as? Map<String, Any?> ?: return null
+        val pcc = cjm["pushChannelContext"] as? Map<String, Any?> ?: return null
+        val la = pcc["liveActivity"] as? Map<String, Any?> ?: return null
+        return la["event"] as? String
     }
 }

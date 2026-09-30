@@ -19,9 +19,11 @@ import com.adobe.marketing.mobile.EventType
 import com.adobe.marketing.mobile.MobileCore
 import com.adobe.marketing.mobile.plugin.ILiveupdatePlugin
 import com.adobe.marketing.mobile.services.Log
+import com.adobe.marketing.mobile.util.TimeUtils
 import com.google.firebase.messaging.RemoteMessage
 import org.json.JSONException
 import org.json.JSONObject
+import java.util.Date
 
 /**
  * Public facade for the Live Updates SDK.
@@ -50,11 +52,16 @@ object LiveUpdates {
 
     // Event dispatch constants.
     private const val EVENT_NAME_LIVE_UPDATE_TRACKING = "Live Update Event Tracking"
+    // Names for the Event Hub-only diagnostic events (see dispatchRenderErrorEvent /
+    // dispatchIncompatibleEvent). These are NOT experience events and never reach Edge.
+    private const val EVENT_NAME_LIVE_UPDATE_RENDER_ERROR = "Live Update Render Error"
+    private const val EVENT_NAME_LIVE_UPDATE_INCOMPATIBLE = "Live Update Incompatible"
     private const val EVENT_DATA_KEY_XDM = "xdm"
 
     // XDM schema field names - match the canonical AJO Push Tracking Experience Event Schema,
     // which is the same schema the iOS Live Activities tracking flow populates in production.
     private const val XDM_KEY_EVENT_TYPE = "eventType"
+    private const val XDM_KEY_TIMESTAMP = "timestamp"
     private const val XDM_VALUE_LIVE_UPDATE_TRACKING_RECEIVED = "liveUpdateTracking.received"
 
     // pushChannelContext.liveActivity.event values dispatched in the outbound XDM.
@@ -65,6 +72,11 @@ object LiveUpdates {
     private const val EVENT_VALUE_LIVE_UPDATE_START = "liveupdate_start"
     private const val EVENT_VALUE_LIVE_UPDATE_UPDATE = "liveupdate_update"
     private const val EVENT_VALUE_LIVE_UPDATE_END = "liveupdate_end"
+    // pushChannelContext.liveActivity.event value used for the retroactive "start" catch-up event
+    // that is emitted when a backend update/end arrives for a Live Update that was started locally
+    // (see dispatchLiveUpdateEventTracking). Kept as a single distinct constant so the exact
+    // reporting name can be confirmed with the backend and changed here in one line.
+    private const val EVENT_VALUE_LIVE_UPDATE_LOCAL_START = "liveupdate_localstart"
     // Topic subscription tracking values. Dispatched via trackTopicSubscribed /
     // trackTopicUnsubscribed after the host app completes the corresponding
     // FirebaseMessaging call.
@@ -73,6 +85,48 @@ object LiveUpdates {
     private const val XDM_VALUE_LIVE_UPDATE_TRACKING_TOPIC = "liveUpdateTracking.topic"
     private const val XDM_VALUE_LIVE_UPDATE_TRACKING_APPLICATION_OPENED = "liveUpdateTracking.applicationOpened"
     private const val XDM_VALUE_LIVE_UPDATE_TRACKING_CUSTOM_ACTION = "liveUpdateTracking.customAction"
+
+    // ---- Render error / incompatibility reporting (Event Hub events only) ----
+    // These report customer-payload / environment problems the SDK hits while trying to render
+    // an incoming Live Update; they are not defects in the SDK itself, hence "renderError".
+    // Categories: the top-level XDM `eventType`, mirroring the reporting-facing tracking
+    // categories above. Unlike the tracking events these ride the Event Hub only (dispatched
+    // with EventType.MESSAGING + EventSource.ERROR_RESPONSE_CONTENT) and are never forwarded
+    // to Edge / AJO, so they carry no dataset override. The subcategory rides in
+    // pushChannelContext.liveActivity.event, exactly like the liveupdate_* lifecycle values.
+    private const val XDM_VALUE_LIVE_UPDATE_TRACKING_RENDER_ERROR = "liveUpdateTracking.renderError"
+    private const val XDM_VALUE_LIVE_UPDATE_TRACKING_INCOMPATIBLE = "liveUpdateTracking.incompatible"
+
+    // Category A subcategories (liveUpdateTracking.renderError). Internal so LiveUpdatePlugin
+    // and NotificationHistoryManager, which own the render / validation pipeline where these
+    // conditions surface, can reference them.
+    // TODO(no_plugin): a "no_plugin" subcategory belongs here once the Messaging SDK reports
+    //   the case where a Live Update push arrives but no ILiveupdatePlugin is registered.
+    internal const val ERROR_SUBCATEGORY_APP_DISCARDED = "app_discarded"
+    internal const val ERROR_SUBCATEGORY_NOTIFICATION_PERMISSION_MISSING = "notification_permission_missing"
+    internal const val ERROR_SUBCATEGORY_STYLE_NULL = "style_null"
+
+    // Fired (and the Live Update dropped, never rendered) when the incoming payload's timestamp
+    // is older than the 28-day FCM delivery window - an absolute staleness failure.
+    internal const val ERROR_SUBCATEGORY_INVALID_TIMESTAMP = "invalid_timestamp"
+
+    // Fired (and the Live Update dropped) when the incoming payload's timestamp is not newer than
+    // the last state already recorded for the same (notificationId, channelId) - i.e. an update
+    // that arrived out of order (older) or a duplicate, superseded by a state already received.
+    internal const val ERROR_SUBCATEGORY_OUTDATED_TIMESTAMP = "outdated_timestamp"
+
+    // Fired (and the Live Update dropped) when event_type is not one the SDK recognizes
+    // (start / update / end); a random or unknown state from the backend.
+    internal const val ERROR_SUBCATEGORY_INVALID_EVENT_TYPE = "invalid_event_type"
+
+    // Category B subcategories (liveUpdateTracking.incompatible). One per precondition the
+    // renderer checks before a notification can be promoted to a Live Update chip.
+    internal const val INCOMPATIBLE_SUBCATEGORY_DEVICE_API_BELOW_36 = "device_api_below_36"
+    internal const val INCOMPATIBLE_SUBCATEGORY_NOT_PROMOTABLE = "not_promotable"
+    internal const val INCOMPATIBLE_SUBCATEGORY_NOTIFICATION_MANAGER_UNAVAILABLE = "notification_manager_unavailable"
+    internal const val INCOMPATIBLE_SUBCATEGORY_CHANNEL_NOT_REGISTERED = "channel_not_registered"
+    internal const val INCOMPATIBLE_SUBCATEGORY_CHANNEL_IMPORTANCE_LOW = "channel_importance_low"
+    internal const val INCOMPATIBLE_SUBCATEGORY_PROMOTION_NOT_PERMITTED = "promotion_not_permitted"
     private const val XDM_KEY_PUSH_NOTIFICATION_TRACKING = "pushNotificationTracking"
     private const val XDM_KEY_CUSTOM_ACTION = "customAction"
     private const val XDM_KEY_ACTION_ID = "actionID"
@@ -85,7 +139,7 @@ object LiveUpdates {
     private const val XDM_KEY_MESSAGE_PROFILE = "messageProfile"
     private const val XDM_KEY_CHANNEL = "channel"
     private const val XDM_KEY_ID = "_id"
-    private const val XDM_VALUE_PUSH_CHANNEL_ID = "https://ns.adobe.com/xdm/channels/push"
+    private const val XDM_VALUE_LIVE_ACTIVITY_CHANNEL_ID = "https://ns.adobe.com/xdm/channels/liveactivity"
     private const val XDM_KEY_PUSH_CHANNEL_CONTEXT = "pushChannelContext"
     private const val XDM_KEY_PLATFORM = "platform"
     private const val XDM_VALUE_PLATFORM_FCM = "fcm"
@@ -348,34 +402,6 @@ object LiveUpdates {
     // ---------- Topic subscription tracking ----------
 
     /**
-     * Dispatches a tracking event indicating the device has successfully subscribed to
-     * an FCM topic. Fired by the host application after
-     * [com.google.firebase.messaging.FirebaseMessaging.subscribeToTopic] completes
-     * successfully. Topic subscribe / unsubscribe themselves are intentionally NOT part of
-     * the SDK's public API - the application owns that mechanic - the SDK only exposes the
-     * tracking dispatch so subscribe events land in AJO reporting alongside the receive
-     * lifecycle events.
-     *
-     * Outbound XDM: `pushChannelContext.liveActivity.event = "topic_subscribed"`,
-     * `channelID = <topic>`, `liveActivityID` populated when a [notificationId] is provided
-     * (e.g. when the subscription is triggered from an `onStart` Live Update listener).
-     *
-     * @param topic the FCM topic name (no `/topics/` prefix)
-     * @param notificationId the Live Update `notification_id` that triggered the
-     *   subscription, or `null` when the subscription is not tied to a specific chip
-     */
-    @JvmStatic
-    @JvmOverloads
-    fun trackTopicSubscribed(topic: String, notificationId: String? = null) {
-        dispatchTopicTracking(
-            topic = topic,
-            event = EVENT_VALUE_TOPIC_SUBSCRIBED,
-            notificationId = notificationId,
-            incomingXdm = null
-        )
-    }
-
-    /**
      * Live-Update-triggered variant of [trackTopicSubscribed]. Use this when the subscription
      * was raised in response to a Live Update (e.g. from an `onStart` callback): the full
      * [payload] is threaded in so the topic event correlates to the originating campaign /
@@ -388,36 +414,12 @@ object LiveUpdates {
      * @param payload the Live Update payload that triggered the subscription
      */
     @JvmStatic
-    fun trackTopicSubscribed(topic: String, payload: LiveUpdatePayload) {
+    fun trackTopicSubscribed(payload: LiveUpdatePayload) {
         dispatchTopicTracking(
-            topic = topic,
+            topic = payload.topicName ?: "",
             event = EVENT_VALUE_TOPIC_SUBSCRIBED,
             notificationId = payload.notificationId,
             incomingXdm = payload.xdm
-        )
-    }
-
-    /**
-     * Dispatches a tracking event indicating the device has successfully unsubscribed
-     * from an FCM topic. Companion to [trackTopicSubscribed] - fire after
-     * [com.google.firebase.messaging.FirebaseMessaging.unsubscribeFromTopic] completes
-     * successfully.
-     *
-     * Outbound XDM: `pushChannelContext.liveActivity.event = "topic_unsubscribed"`,
-     * `channelID = <topic>`, `liveActivityID` populated when a [notificationId] is provided.
-     *
-     * @param topic the FCM topic name
-     * @param notificationId the Live Update `notification_id` that triggered the
-     *   unsubscription, or `null` when the unsubscription is not tied to a specific chip
-     */
-    @JvmStatic
-    @JvmOverloads
-    fun trackTopicUnsubscribed(topic: String, notificationId: String? = null) {
-        dispatchTopicTracking(
-            topic = topic,
-            event = EVENT_VALUE_TOPIC_UNSUBSCRIBED,
-            notificationId = notificationId,
-            incomingXdm = null
         )
     }
 
@@ -431,9 +433,9 @@ object LiveUpdates {
      * @param payload the Live Update payload that triggered the unsubscription
      */
     @JvmStatic
-    fun trackTopicUnsubscribed(topic: String, payload: LiveUpdatePayload) {
+    fun trackTopicUnsubscribed(payload: LiveUpdatePayload) {
         dispatchTopicTracking(
-            topic = topic,
+            topic = payload.topicName ?: "",
             event = EVENT_VALUE_TOPIC_UNSUBSCRIBED,
             notificationId = payload.notificationId,
             incomingXdm = payload.xdm
@@ -490,13 +492,13 @@ object LiveUpdates {
      *   "_experience": {
      *     "customerJourneyManagement": {
      *       (passthrough from incoming _xdm: messageExecution, decisioning, etc.)
-     *       "messageProfile":      { "channel": { "_id": "https://ns.adobe.com/xdm/channels/push" } },
+     *       "messageProfile":      { "channel": { "_id": "https://ns.adobe.com/xdm/channels/liveactivity" } },
      *       "pushChannelContext":  {
      *         "platform":     "fcm",
      *         "liveActivity": {
      *           "liveActivityID": "<notification_id>",
      *           "channelID":      "<topic_name>",
-     *           "event":          "liveupdate_start" | "liveupdate_update" | "liveupdate_end"
+     *           "event":          "liveupdate_start" | "liveupdate_update" | "liveupdate_end" | "liveupdate_localstart"
      *         }
      *       }
      *     }
@@ -506,24 +508,64 @@ object LiveUpdates {
      */
     internal fun dispatchLiveUpdateEventTracking(context: Context, payload: LiveUpdatePayload) {
         val eventType = payload.eventType
-        val isCanonical = eventType == LiveUpdatePayload.EVENT_TYPE_START ||
-            eventType == LiveUpdatePayload.EVENT_TYPE_UPDATE ||
-            eventType == LiveUpdatePayload.EVENT_TYPE_END ||
-            eventType == LiveUpdatePayload.EVENT_TYPE_LOCAL_START
-        if (!isCanonical) {
+
+        // Locally-triggered start ([LiveUpdates.triggerLocalLiveUpdate]): there is no backend
+        // `_xdm` yet, so there is nothing to report - do NOT dispatch a `received` tracking event.
+        // Instead register the (notificationId, channelId) so a later backend update/end can
+        // retroactively report the start, correlated to that campaign (see the catch-up below).
+        // Listener callbacks still fire (via invokeListener), independent of tracking.
+        // TODO(local-update): this only handles a locally-triggered *start*. If the app is ever
+        //   allowed to push a local *update* (event_type=update through triggerLocalLiveUpdate),
+        //   decide whether that should suppress tracking / refresh the registry rather than take
+        //   the catch-up path below (which assumes update/end come from the backend with `_xdm`).
+        if (eventType == LiveUpdatePayload.EVENT_TYPE_LOCAL_START) {
+            NotificationHistoryManager.recordLocalStart(payload)
+            Log.debug(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "Local start id=${payload.notificationId}: registered for catch-up; no tracking " +
+                    "dispatched (locally triggered, no _xdm)."
+            )
+            return
+        }
+
+        if (!payload.isCanonicalEventType) {
             Log.debug(
                 LiveUpdatesConstants.LOG_TAG, SELF_TAG,
                 "Skipping Live Update event tracking dispatch: event_type='$eventType' is not start/update/end."
             )
             return
         }
-        // Map the envelope's raw event_type to the outbound XDM reporting value.
-        // The envelope stays as start / update / end (server + parser contract);
-        // the outbound XDM uses the prefixed liveupdate_* values for AJO reporting.
-        // EVENT_TYPE_LOCAL_START (app-raised locally) reports as liveupdate_start.
+
+        // Catch-up: if this (notificationId, channelId) was started locally, the start was never
+        // reported (no `_xdm` then). Retroactively emit the start as a `received` event carrying
+        // THIS backend event's `_xdm` (copied) with the liveActivity.event changed to the
+        // localstart value, so the backend correlates the locally-started activity to this
+        // campaign. The event is stamped with the time the local start actually happened (epoch
+        // millis recorded then), not the time this catch-up fires. Fire it exactly once -
+        // consumeLocalStart removes the registry entry.
+        val localStartMillis = NotificationHistoryManager.consumeLocalStart(payload)
+        if (localStartMillis != null) {
+            Log.debug(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "Local-start catch-up for id=${payload.notificationId}: emitting a '$EVENT_VALUE_LIVE_UPDATE_LOCAL_START' " +
+                    "received event from the incoming $eventType's _xdm."
+            )
+            dispatchTrackingEvent(
+                xdmEventType = XDM_VALUE_LIVE_UPDATE_TRACKING_RECEIVED,
+                notificationId = payload.notificationId,
+                topicName = payload.topicName,
+                liveActivityEvent = EVENT_VALUE_LIVE_UPDATE_LOCAL_START,
+                incomingXdm = payload.xdm,
+                customActionId = null,
+                eventTimestampMillis = localStartMillis
+            )
+        }
+
+        // Map the envelope's raw event_type to the outbound XDM reporting value. The envelope
+        // stays as start / update / end (server + parser contract); the outbound XDM uses the
+        // prefixed liveupdate_* values for AJO reporting.
         val liveActivityEventXdmValue = when (eventType) {
-            LiveUpdatePayload.EVENT_TYPE_START,
-            LiveUpdatePayload.EVENT_TYPE_LOCAL_START -> EVENT_VALUE_LIVE_UPDATE_START
+            LiveUpdatePayload.EVENT_TYPE_START -> EVENT_VALUE_LIVE_UPDATE_START
             LiveUpdatePayload.EVENT_TYPE_UPDATE -> EVENT_VALUE_LIVE_UPDATE_UPDATE
             LiveUpdatePayload.EVENT_TYPE_END -> EVENT_VALUE_LIVE_UPDATE_END
             else -> return // isCanonical guard above makes this unreachable
@@ -591,7 +633,8 @@ object LiveUpdates {
         topicName: String?,
         liveActivityEvent: String?,
         incomingXdm: JSONObject?,
-        customActionId: String?
+        customActionId: String?,
+        eventTimestampMillis: Long? = null
     ) {
         val xdmMap = buildLiveActivityTrackingXdm(
             xdmEventType = xdmEventType,
@@ -600,7 +643,13 @@ object LiveUpdates {
             liveActivityEvent = liveActivityEvent,
             incomingXdm = incomingXdm,
             customActionId = customActionId
-        )
+        ).toMutableMap()
+        // An Event's own timestamp cannot be set (it is stamped at build time), but Edge honours
+        // a pre-set XDM `timestamp`, so a deferred event carries its original time this way.
+        // Same ISO-8601 UTC millisecond format Edge itself generates.
+        eventTimestampMillis?.let {
+            xdmMap[XDM_KEY_TIMESTAMP] = TimeUtils.getISO8601UTCDateWithMilliseconds(Date(it))
+        }
         val eventData = mutableMapOf<String, Any?>(EVENT_DATA_KEY_XDM to xdmMap)
         cachedEventDatasetId?.let { datasetId ->
             eventData[EVENT_DATA_KEY_META] = mapOf<String, Any?>(
@@ -612,6 +661,81 @@ object LiveUpdates {
             EventType.EDGE,
             EventSource.REQUEST_CONTENT
         ).setEventData(eventData).build()
+        MobileCore.dispatchEvent(event)
+    }
+
+    // ---------- Render error / incompatibility reporting (Event Hub only) ----------
+
+    /**
+     * Dispatches a render-error diagnostic as an Event Hub event (category
+     * `liveUpdateTracking.renderError`). Fired when the SDK cannot render an otherwise
+     * well-formed Live Update because of a customer-payload or environment problem - the app's
+     * interceptor discarded it, the style provider returned null, or the OS is not permitted to
+     * post the notification. It reports a problem outside the SDK, not an SDK defect. [subcategory]
+     * is one of the `ERROR_SUBCATEGORY_*` values and rides in `pushChannelContext.liveActivity.event`.
+     *
+     * The originating [payload] supplies the correlation fields (`notificationId`, `topicName`,
+     * and the `_xdm` passthrough); [subcategory] is the only thing not carried on the payload.
+     *
+     * Unlike the lifecycle / interaction tracking dispatches, this is NOT an experience event:
+     * it is dispatched with [EventType.MESSAGING] + [EventSource.ERROR_RESPONSE_CONTENT] so it
+     * stays on the Event Hub and is never forwarded to Edge / AJO.
+     */
+    internal fun dispatchRenderErrorEvent(subcategory: String, payload: LiveUpdatePayload) {
+        dispatchErrorHubEvent(
+            eventName = EVENT_NAME_LIVE_UPDATE_RENDER_ERROR,
+            xdmEventType = XDM_VALUE_LIVE_UPDATE_TRACKING_RENDER_ERROR,
+            subcategory = subcategory,
+            payload = payload
+        )
+    }
+
+    /**
+     * Dispatches an incompatibility diagnostic as an Event Hub event (category
+     * `liveUpdateTracking.incompatible`). Fired when a Live Update posts but cannot be promoted
+     * to a status-bar chip because a device / channel / notification precondition failed.
+     * [subcategory] is one of the `INCOMPATIBLE_SUBCATEGORY_*` values and rides in
+     * `pushChannelContext.liveActivity.event`. The originating [payload] supplies the correlation
+     * fields.
+     *
+     * Event Hub only (see [dispatchRenderErrorEvent]); never forwarded to Edge / AJO.
+     */
+    internal fun dispatchIncompatibleEvent(subcategory: String, payload: LiveUpdatePayload) {
+        dispatchErrorHubEvent(
+            eventName = EVENT_NAME_LIVE_UPDATE_INCOMPATIBLE,
+            xdmEventType = XDM_VALUE_LIVE_UPDATE_TRACKING_INCOMPATIBLE,
+            subcategory = subcategory,
+            payload = payload
+        )
+    }
+
+    /**
+     * Shared build + dispatch for the Event Hub-only error / incompatibility diagnostics. Pulls
+     * the correlation fields (`notificationId`, `topicName`, `_xdm`) off [payload] and reuses
+     * [buildLiveActivityTrackingXdm] so the shape matches the tracking events (category in
+     * `eventType`, subcategory in `pushChannelContext.liveActivity.event`), but dispatches with
+     * [EventType.MESSAGING] + [EventSource.ERROR_RESPONSE_CONTENT] and attaches no dataset
+     * override, since these events are consumed on the hub and never routed to Edge.
+     */
+    private fun dispatchErrorHubEvent(
+        eventName: String,
+        xdmEventType: String,
+        subcategory: String,
+        payload: LiveUpdatePayload
+    ) {
+        val xdmMap = buildLiveActivityTrackingXdm(
+            xdmEventType = xdmEventType,
+            notificationId = payload.notificationId,
+            topicName = payload.topicName,
+            liveActivityEvent = subcategory,
+            incomingXdm = payload.xdm,
+            customActionId = null
+        )
+        val event = Event.Builder(
+            eventName,
+            EventType.MESSAGING,
+            EventSource.ERROR_RESPONSE_CONTENT
+        ).setEventData(mapOf<String, Any?>(EVENT_DATA_KEY_XDM to xdmMap)).build()
         MobileCore.dispatchEvent(event)
     }
 
@@ -686,7 +810,7 @@ object LiveUpdates {
             ?: mutableMapOf()
         if (!messageProfile.containsKey(XDM_KEY_CHANNEL)) {
             messageProfile[XDM_KEY_CHANNEL] = mapOf<String, Any?>(
-                XDM_KEY_ID to XDM_VALUE_PUSH_CHANNEL_ID
+                XDM_KEY_ID to XDM_VALUE_LIVE_ACTIVITY_CHANNEL_ID
             )
         }
         cjm[XDM_KEY_MESSAGE_PROFILE] = messageProfile
@@ -756,7 +880,9 @@ object LiveUpdates {
         try {
             listener.onLiveUpdateReceived(payload)
             when (payload.eventType) {
-                LiveUpdatePayload.EVENT_TYPE_START -> listener.onStart(payload)
+                // A locally-triggered start is still a start from the app's perspective.
+                LiveUpdatePayload.EVENT_TYPE_START,
+                LiveUpdatePayload.EVENT_TYPE_LOCAL_START -> listener.onStart(payload)
                 LiveUpdatePayload.EVENT_TYPE_UPDATE -> listener.onUpdate(payload)
                 LiveUpdatePayload.EVENT_TYPE_END -> listener.onEnd(payload)
                 else -> {

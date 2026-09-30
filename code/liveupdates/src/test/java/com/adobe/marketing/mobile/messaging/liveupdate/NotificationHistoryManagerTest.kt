@@ -11,12 +11,33 @@
 
 package com.adobe.marketing.mobile.messaging.liveupdate
 
+import com.adobe.marketing.mobile.MobileCore
+import org.junit.After
+import org.junit.Before
 import org.junit.Test
+import org.mockito.ArgumentMatchers.any
+import org.mockito.MockedStatic
+import org.mockito.Mockito.mockStatic
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class NotificationHistoryManagerTest {
+
+    // recordAndValidate dispatches the old_timestamp render error via MobileCore on a stale
+    // rejection, so the static must be mocked to keep these plain (non-Robolectric) tests off
+    // the real Event Hub.
+    private lateinit var mobileCoreMock: MockedStatic<MobileCore>
+
+    @Before
+    fun setUp() {
+        mobileCoreMock = mockStatic(MobileCore::class.java)
+    }
+
+    @After
+    fun tearDown() {
+        mobileCoreMock.close()
+    }
 
     @Test
     fun `isTimestampFresh rejects a timestamp older than the 28-day TTL`() {
@@ -47,6 +68,22 @@ class NotificationHistoryManagerTest {
     }
 
     @Test
+    fun `evictExpiredAsync swallows a database failure and leaves the executor usable`() {
+        // No app context here, so NotificationHistoryDatabase.getInstance() throws inside the task.
+        NotificationHistoryManager.evictExpiredAsync()
+
+        val payload = LiveUpdatePayload.create(
+            notificationId = "id5",
+            channelId = "chan5",
+            eventType = LiveUpdatePayload.EVENT_TYPE_START,
+            title = "Title",
+            timestamp = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis())
+        )
+        // Runs after the failed eviction on the same executor and still fails open.
+        assertTrue(NotificationHistoryManager.recordTimestamp(payload))
+    }
+
+    @Test
     fun `recordAndValidate short-circuits on a stale timestamp without recording it`() {
         val staleTimestamp = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis()) -
             TimeUnit.DAYS.toSeconds(29)
@@ -59,6 +96,8 @@ class NotificationHistoryManagerTest {
         )
 
         assertFalse(NotificationHistoryManager.recordAndValidate(payload))
+        // The stale rejection dispatches the invalid_timestamp render error to the Event Hub.
+        mobileCoreMock.verify { MobileCore.dispatchEvent(any()) }
     }
 
     @Test

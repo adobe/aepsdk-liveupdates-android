@@ -94,13 +94,16 @@ class LiveUpdatePayloadTest {
     }
 
     @Test
-    fun `parse returns null when title missing`() {
+    fun `parse succeeds when title missing (title is optional)`() {
         val envelope = JSONObject()
             .put("notification_id", "id1")
             .put("notification_channel_id", "chan")
             .put("event_type", "start")
+            .put("timestamp", 1000L)
         val message = remoteMessageWith(envelope.toString(), null)
-        assertNull(LiveUpdatePayload.parse(message))
+        val payload = LiveUpdatePayload.parse(message)
+        assertNotNull(payload)
+        assertNull(payload!!.title)
     }
 
     @Test
@@ -227,6 +230,30 @@ class LiveUpdatePayloadTest {
         assertNull(payload.priority)
         assertNull(payload.body)
         assertNull(payload.xdm)
+    }
+
+    @Test
+    fun `create converts an epoch millis timestamp to seconds`() {
+        val payload = LiveUpdatePayload.create(
+            notificationId = "id1",
+            channelId = "chan",
+            eventType = LiveUpdatePayload.EVENT_TYPE_LOCAL_START,
+            title = "Title",
+            timestamp = 1_700_000_123_456L
+        )
+        assertEquals(1_700_000_123L, payload.timestamp)
+    }
+
+    @Test
+    fun `create leaves an epoch seconds timestamp untouched`() {
+        val payload = LiveUpdatePayload.create(
+            notificationId = "id1",
+            channelId = "chan",
+            eventType = LiveUpdatePayload.EVENT_TYPE_LOCAL_START,
+            title = "Title",
+            timestamp = 1_700_000_123L
+        )
+        assertEquals(1_700_000_123L, payload.timestamp)
     }
 
     @Test

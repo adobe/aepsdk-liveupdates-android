@@ -29,15 +29,19 @@ import org.json.JSONObject
  *  - `notification_id`
  *  - `notification_channel_id`
  *  - `event_type`
- *  - `title`
  *  - `timestamp`
+ *
+ * `title` is optional. The platform requires a `contentTitle` to promote a notification to a
+ * Live Update chip, so a title-less payload still parses and renders but degrades to a normal
+ * ongoing notification (surfaced via the `incompatible` diagnostic). Styles differ in whether a
+ * title is visually needed, so the SDK does not hard-require it.
  */
 class LiveUpdatePayload private constructor(
     // SDK-canonical fields (drive NotificationCompat.Builder calls and event tracking)
     val notificationId: String,
     val channelId: String,
     val eventType: String,
-    val title: String,
+    val title: String?,
     val timestamp: Long,
     val priority: String?,
     val body: String?,
@@ -63,6 +67,17 @@ class LiveUpdatePayload private constructor(
 ) {
 
     /**
+     * True when [eventType] is one of the values the SDK renders and tracks:
+     * `start` / `update` / `end`, plus the app-raised `localstart`. A payload whose
+     * `event_type` is anything else is an unrecognized state and is dropped by the renderer.
+     */
+    internal val isCanonicalEventType: Boolean
+        get() = eventType == EVENT_TYPE_START ||
+            eventType == EVENT_TYPE_UPDATE ||
+            eventType == EVENT_TYPE_END ||
+            eventType == EVENT_TYPE_LOCAL_START
+
+    /**
      * Concise, log-friendly representation. The default (non-data-class) `toString()` would
      * only print the object hash, so this surfaces the key identifying fields instead.
      */
@@ -82,7 +97,7 @@ class LiveUpdatePayload private constructor(
         obj.put(KEY_NOTIFICATION_ID, notificationId)
         obj.put(KEY_CHANNEL_ID, channelId)
         obj.put(KEY_EVENT_TYPE, eventType)
-        obj.put(KEY_TITLE, title)
+        title?.let { obj.put(KEY_TITLE, it) }
         obj.put(KEY_TIMESTAMP, timestamp)
         priority?.let { obj.put(KEY_PRIORITY, it) }
         body?.let { obj.put(KEY_BODY, it) }
@@ -138,13 +153,15 @@ class LiveUpdatePayload private constructor(
          * intermediate `RemoteMessage`. Primary use case is
          * [LiveUpdates.triggerLocalLiveUpdate], where the host app raises a Live Update
          * chip programmatically. Required inputs match the envelope's required fields
-         * (`notification_id`, `notification_channel_id`, `event_type`, `title`, `timestamp`);
-         * everything else is optional and defaults to `null` / absent.
+         * (`notification_id`, `notification_channel_id`, `event_type`, `timestamp`);
+         * everything else, including `title`, is optional and defaults to `null` / absent.
          *
-         * @param timestamp epoch **seconds** (not millis), matching the backend envelope's
-         * `timestamp` field. Used as-is for staleness/regression checks in
-         * [NotificationHistoryManager]; passing millis here will be misread as a
-         * far-future/implausible timestamp.
+         * @param title optional; a title-less payload still renders but will not promote to a
+         * Live Update chip (the platform requires a `contentTitle` for promotion).
+         * @param timestamp epoch **seconds**, matching the backend envelope's `timestamp` field.
+         * Used for staleness/regression checks in [NotificationHistoryManager]. As a guard rail,
+         * a value that is implausibly large for seconds (e.g. epoch millis) is converted to
+         * seconds rather than being misread as a far-future timestamp.
          */
         @JvmStatic
         @JvmOverloads
@@ -152,7 +169,7 @@ class LiveUpdatePayload private constructor(
             notificationId: String,
             channelId: String,
             eventType: String,
-            title: String,
+            title: String?,
             timestamp: Long,
             priority: String? = null,
             body: String? = null,
@@ -168,7 +185,7 @@ class LiveUpdatePayload private constructor(
             channelId = channelId,
             eventType = eventType,
             title = title,
-            timestamp = timestamp,
+            timestamp = normalizeToEpochSeconds(timestamp),
             priority = priority,
             body = body,
             criticalText = criticalText,
@@ -180,6 +197,26 @@ class LiveUpdatePayload private constructor(
             xdm = xdm
         )
 
+        /**
+         * Guard rail for app-built payloads: if [timestamp] is too large to be epoch seconds
+         * (epoch millis, or finer), scales it down by 1000s until it is. Values already in
+         * seconds are returned untouched.
+         */
+        private fun normalizeToEpochSeconds(timestamp: Long): Long {
+            var seconds = timestamp
+            while (seconds > MAX_PLAUSIBLE_TIMESTAMP_SECONDS) {
+                seconds /= 1000
+            }
+            if (seconds != timestamp) {
+                Log.warning(
+                    LiveUpdatesConstants.LOG_TAG,
+                    SELF_TAG,
+                    "Live Update timestamp $timestamp is not epoch seconds; converted to $seconds."
+                )
+            }
+            return seconds
+        }
+
         /** Fast detection - does this [message] carry the Live Update envelope key? */
         @JvmStatic
         fun isLiveUpdate(message: RemoteMessage): Boolean =
@@ -188,7 +225,7 @@ class LiveUpdatePayload private constructor(
         /**
          * Parses [message] into a [LiveUpdatePayload]. Returns `null` when the envelope is
          * absent, malformed, or missing any required field (`notification_id`,
-         * `notification_channel_id`, `event_type`, `title`).
+         * `notification_channel_id`, `event_type`, `timestamp`). `title` is optional.
          */
         @JvmStatic
         fun parse(message: RemoteMessage): LiveUpdatePayload? {
@@ -221,7 +258,9 @@ class LiveUpdatePayload private constructor(
             val notificationId = obj.requiredString(KEY_NOTIFICATION_ID) ?: return null
             val channelId = obj.requiredString(KEY_CHANNEL_ID) ?: return null
             val eventType = obj.requiredString(KEY_EVENT_TYPE) ?: return null
-            val title = obj.requiredString(KEY_TITLE) ?: return null
+            // title is optional: a title-less payload still parses (it renders but will not be
+            // promoted to a chip, since the platform requires a contentTitle for promotion).
+            val title = obj.optString(KEY_TITLE).takeIf { it.isNotEmpty() }
             val timestamp = obj.secondsTimestamp(KEY_TIMESTAMP, required = true) ?: return null
 
             // Parse the _xdm block as a typed JSONObject. Opaque to the SDK; null when

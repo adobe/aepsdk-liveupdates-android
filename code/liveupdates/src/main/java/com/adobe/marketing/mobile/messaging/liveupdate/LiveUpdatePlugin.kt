@@ -38,9 +38,11 @@ import java.util.concurrent.TimeUnit
  * MobileCore.addPlugins(LiveUpdatePlugin(MyStyleProvider()))
  * ```
  *
- * Drops the push (warning log, no notification posted) in these cases:
- *  - payload fails to parse (any required field missing: notification_id, notification_channel_id, event_type, title)
- *  - style provider returns `null`
+ * Drops the push (warning log, no notification posted) when the payload fails to parse (any
+ * required field missing: notification_id, notification_channel_id, event_type, title).
+ *
+ * When the style provider returns `null` the notification is still posted, without a style, and a
+ * `renderError` / `style_null` diagnostic is dispatched (the SDK applies no default style).
  *
  * After a successful `notify(...)`, dispatches the Live Update event tracking
  * (`MobileCore.dispatchEvent`) so Edge forwards it to AJO, and invokes the registered
@@ -87,15 +89,6 @@ class LiveUpdatePlugin(
             )
             return
         }
-        // Consult the app-registered interceptor before any rendering / tracking / listener
-        // dispatch. A `false` verdict drops the Live Update entirely.
-        if (!LiveUpdates.shouldDisplay(payload)) {
-            Log.debug(
-                LiveUpdatesConstants.LOG_TAG, TAG,
-                "Live Update id=${payload.notificationId} vetoed by ILiveUpdateInterceptor; dropping."
-            )
-            return
-        }
         postLiveUpdate(context, payload)
     }
 
@@ -106,6 +99,29 @@ class LiveUpdatePlugin(
      * ([LiveUpdates.triggerLocalLiveUpdate]).
      */
     internal fun postLiveUpdate(context: Context, payload: LiveUpdatePayload) {
+        // Consult the app-registered interceptor before any rendering / tracking / listener
+        // dispatch. A `false` verdict drops the Live Update entirely.
+        if (!LiveUpdates.shouldDisplay(payload)) {
+            Log.debug(
+                LiveUpdatesConstants.LOG_TAG, TAG,
+                "Live Update id=${payload.notificationId} discarded by ILiveUpdateInterceptor; dropping."
+            )
+            LiveUpdates.dispatchRenderErrorEvent(LiveUpdates.ERROR_SUBCATEGORY_APP_DISCARDED, payload)
+            return
+        }
+        // Reject an unrecognized event_type (anything other than start / update / end / localstart)
+        // before any history or rendering work: a random state from the backend is not a Live
+        // Update the SDK knows how to render, so drop it and report the render error.
+        if (!payload.isCanonicalEventType) {
+            Log.warning(
+                LiveUpdatesConstants.LOG_TAG,
+                TAG,
+                "Dropping Live Update id=${payload.notificationId}: unrecognized " +
+                    "event_type='${payload.eventType}' (expected start / update / end)."
+            )
+            LiveUpdates.dispatchRenderErrorEvent(LiveUpdates.ERROR_SUBCATEGORY_INVALID_EVENT_TYPE, payload)
+            return
+        }
         if (!NotificationHistoryManager.recordAndValidate(payload)) {
             Log.warning(
                 LiveUpdatesConstants.LOG_TAG,
@@ -121,9 +137,10 @@ class LiveUpdatePlugin(
             Log.warning(
                 LiveUpdatesConstants.LOG_TAG,
                 TAG,
-                "Dropping Live Update id=${payload.notificationId}: style provider returned null."
+                "Style provider returned null for Live Update id=${payload.notificationId}; " +
+                    "rendering the notification without a style."
             )
-            return
+            LiveUpdates.dispatchRenderErrorEvent(LiveUpdates.ERROR_SUBCATEGORY_STYLE_NULL, payload)
         }
 
         // Ensure the NotificationChannel exists. On API 26+ Android silently drops
@@ -137,12 +154,13 @@ class LiveUpdatePlugin(
             .setSmallIcon(resolveSmallIcon(context, payload.smallIcon))
             .setContentTitle(payload.title)
             .setContentText(payload.body)
-            .setStyle(style)
             .setOngoing(true)
             .setRequestPromotedOngoing(true)
             .setPriority(mapPriority(payload.priority))
             .setContentIntent(buildTapPendingIntent(context, payload))
-            .setDeleteIntent(buildDismissPendingIntent(context, payload))
+        // A null style (style provider returned null) still renders, just without a promoted
+        // style; the render error was already reported above.
+        style?.let { builder.setStyle(it) }
         payload.criticalText?.let { builder.setShortCriticalText(it) }
         payload.whenSeconds?.let { builder.setWhen(TimeUnit.SECONDS.toMillis(it)).setShowWhen(true) }
 
@@ -153,25 +171,46 @@ class LiveUpdatePlugin(
             payload.dismissAfterSeconds?.takeIf { it > 0L }?.let {
                 builder.setTimeoutAfter(TimeUnit.SECONDS.toMillis(it))
             }
+        } else {
+            builder.setDeleteIntent(buildDismissPendingIntent(context, payload))
         }
 
         val notification = builder.build()
 
-        checkPromotionEligibility(context, notification)?.let { reason ->
+        // Report (Event Hub only) when the OS will not surface the notification because the app
+        // is not permitted to post notifications (POST_NOTIFICATIONS denied on API 33+, or the
+        // user turned notifications off). This is additive diagnostics: the notify() call below
+        // still runs, and the OS silently drops it.
+        val notificationManager = NotificationManagerCompat.from(context)
+        if (!notificationManager.areNotificationsEnabled()) {
             Log.warning(
                 LiveUpdatesConstants.LOG_TAG,
                 TAG,
-                "Live Update will post as a NORMAL ongoing notification (not promoted to chip). Reason: $reason"
+                "Live Update id=${payload.notificationId}: notifications are disabled at the system " +
+                    "level; the OS will not display the chip."
+            )
+            LiveUpdates.dispatchRenderErrorEvent(
+                LiveUpdates.ERROR_SUBCATEGORY_NOTIFICATION_PERMISSION_MISSING,
+                payload
             )
         }
 
-        NotificationManagerCompat.from(context)
-            .notify(payload.notificationId.hashCode(), notification)
+        checkPromotionEligibility(context, notification)?.let { issue ->
+            Log.warning(
+                LiveUpdatesConstants.LOG_TAG,
+                TAG,
+                "Live Update will post as a NORMAL ongoing notification (not promoted to chip). Reason: ${issue.reason}"
+            )
+            LiveUpdates.dispatchIncompatibleEvent(issue.subcategory, payload)
+        }
 
+        notificationManager.notify(payload.notificationId.hashCode(), notification)
         // Live Update event tracking dispatch + listener invocation. Both no-op gracefully
         // if event_type is non-canonical (logged inside the helpers); listener can be null.
         LiveUpdates.dispatchLiveUpdateEventTracking(context, payload)
         LiveUpdates.invokeListener(payload)
+
+        NotificationHistoryManager.evictExpiredAsync()
     }
 
     /**
@@ -285,36 +324,62 @@ class LiveUpdatePlugin(
     }
 
     /**
+     * A single failing promotion precondition: a stable [subcategory] code (one of the
+     * `LiveUpdates.INCOMPATIBLE_SUBCATEGORY_*` values, dispatched on the incompatible Event Hub
+     * event) plus a human-readable [reason] for the warning log.
+     */
+    private data class PromotionIssue(val subcategory: String, val reason: String)
+
+    /**
      * Returns null when [notification] meets all structural and runtime preconditions for
-     * promotion. Otherwise returns a human-readable reason naming the failing precondition.
+     * promotion. Otherwise returns the first failing precondition as a [PromotionIssue],
+     * carrying both a stable subcategory code and a human-readable reason.
      */
     private fun checkPromotionEligibility(
         context: Context,
         notification: Notification
-    ): String? {
+    ): PromotionIssue? {
         if (Build.VERSION.SDK_INT < 36) {
-            return "device API ${Build.VERSION.SDK_INT} < 36 — Live Update promotion requires API 36+"
+            return PromotionIssue(
+                LiveUpdates.INCOMPATIBLE_SUBCATEGORY_DEVICE_API_BELOW_36,
+                "device API ${Build.VERSION.SDK_INT} is below 36; Live Update promotion requires API 36+"
+            )
         }
 
         if (!notification.hasPromotableCharacteristics()) {
-            return "Notification.hasPromotableCharacteristics() = false " +
-                "(likely cause: style is not promotion-eligible, or small icon missing)"
+            return PromotionIssue(
+                LiveUpdates.INCOMPATIBLE_SUBCATEGORY_NOT_PROMOTABLE,
+                "Notification.hasPromotableCharacteristics() = false " +
+                    "(likely cause: style is not promotion-eligible, or small icon missing)"
+            )
         }
 
         val nm = context.getSystemService(NotificationManager::class.java)
-            ?: return "NotificationManager service unavailable"
+            ?: return PromotionIssue(
+                LiveUpdates.INCOMPATIBLE_SUBCATEGORY_NOTIFICATION_MANAGER_UNAVAILABLE,
+                "NotificationManager service unavailable"
+            )
 
         val channel = nm.getNotificationChannel(notification.channelId)
-            ?: return "channel '${notification.channelId}' is not registered"
+            ?: return PromotionIssue(
+                LiveUpdates.INCOMPATIBLE_SUBCATEGORY_CHANNEL_NOT_REGISTERED,
+                "channel '${notification.channelId}' is not registered"
+            )
 
         if (channel.importance < NotificationManager.IMPORTANCE_HIGH) {
-            return "channel '${notification.channelId}' has importance=${channel.importance}, " +
-                "requires IMPORTANCE_HIGH (${NotificationManager.IMPORTANCE_HIGH})"
+            return PromotionIssue(
+                LiveUpdates.INCOMPATIBLE_SUBCATEGORY_CHANNEL_IMPORTANCE_LOW,
+                "channel '${notification.channelId}' has importance=${channel.importance}, " +
+                    "requires IMPORTANCE_HIGH (${NotificationManager.IMPORTANCE_HIGH})"
+            )
         }
 
         if (!nm.canPostPromotedNotifications()) {
-            return "NotificationManager.canPostPromotedNotifications() = false " +
-                "(app or device not currently permitted to post promoted notifications)"
+            return PromotionIssue(
+                LiveUpdates.INCOMPATIBLE_SUBCATEGORY_PROMOTION_NOT_PERMITTED,
+                "NotificationManager.canPostPromotedNotifications() = false " +
+                    "(app or device not currently permitted to post promoted notifications)"
+            )
         }
 
         return null

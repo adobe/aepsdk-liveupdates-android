@@ -22,6 +22,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
@@ -39,28 +40,68 @@ class NotificationHistoryDatabaseTest {
 
     @Test
     fun `first-time key is accepted`() {
-        assertTrue(database.recordIfNewer("id1", "chan1", 100L, expiresAt = 100_000L, now = 0L))
+        assertTrue(database.recordIfNewer("id1", "chan1", 100L, expiresAt = 100_000L))
     }
 
     @Test
     fun `newer timestamp is accepted and replaces the stored value`() {
-        database.recordIfNewer("id1", "chan1", 1000L, expiresAt = 100_000L, now = 0L)
-        assertTrue(database.recordIfNewer("id1", "chan1", 2000L, expiresAt = 100_000L, now = 0L))
+        database.recordIfNewer("id1", "chan1", 1000L, expiresAt = 100_000L)
+        assertTrue(database.recordIfNewer("id1", "chan1", 2000L, expiresAt = 100_000L))
         assertEquals(2000L, queryTimestamp("id1", "chan1"))
     }
 
     @Test
     fun `equal timestamp is rejected as a duplicate`() {
-        database.recordIfNewer("id1", "chan1", 1000L, expiresAt = 100_000L, now = 0L)
-        assertFalse(database.recordIfNewer("id1", "chan1", 1000L, expiresAt = 100_000L, now = 0L))
+        database.recordIfNewer("id1", "chan1", 1000L, expiresAt = 100_000L)
+        assertFalse(database.recordIfNewer("id1", "chan1", 1000L, expiresAt = 100_000L))
     }
 
     @Test
-    fun `eviction removes rows older than now on the next accepted write`() {
-        database.recordIfNewer("old", "chan1", 1000L, expiresAt = 1500L, now = 0L)
-        database.recordIfNewer("new", "chan1", 5000L, expiresAt = 6000L, now = 2000L)
+    fun `deleteExpired removes only rows expiring before now`() {
+        database.recordIfNewer("old", "chan1", 1000L, expiresAt = 1500L)
+        database.recordIfNewer("new", "chan1", 5000L, expiresAt = 6000L)
+        assertEquals(1, database.deleteExpired(now = 2000L))
         assertNull(queryTimestamp("old", "chan1"))
         assertEquals(5000L, queryTimestamp("new", "chan1"))
+    }
+
+    @Test
+    fun `consumeLocalStart returns null when no local start was recorded`() {
+        assertNull(database.consumeLocalStart("id1", "chan1"))
+    }
+
+    @Test
+    fun `recordLocalStart then consumeLocalStart returns the stored millis once, then null`() {
+        val nowMillis = System.currentTimeMillis()
+        database.recordLocalStart("id1", "chan1", nowMillis)
+        assertEquals(nowMillis, database.consumeLocalStart("id1", "chan1"))
+        // Second consume: entry already removed, so the catch-up cannot fire twice.
+        assertNull(database.consumeLocalStart("id1", "chan1"))
+    }
+
+    @Test
+    fun `local start registry is keyed by notificationId plus channelId`() {
+        val nowMillis = System.currentTimeMillis()
+        database.recordLocalStart("id1", "chanA", nowMillis)
+        // Same id, different channel is a different key.
+        assertNull(database.consumeLocalStart("id1", "chanB"))
+        assertEquals(nowMillis, database.consumeLocalStart("id1", "chanA"))
+    }
+
+    @Test
+    fun `recordLocalStart evicts entries older than the 28 day TTL`() {
+        val nowMillis = System.currentTimeMillis()
+        database.recordLocalStart("stale", "chan1", nowMillis - TimeUnit.DAYS.toMillis(29))
+        database.recordLocalStart("fresh", "chan1", nowMillis)
+        assertNull(database.consumeLocalStart("stale", "chan1"))
+        assertEquals(nowMillis, database.consumeLocalStart("fresh", "chan1"))
+    }
+
+    @Test
+    fun `recordIfNewer no longer evicts expired rows`() {
+        database.recordIfNewer("old", "chan1", 1000L, expiresAt = 1500L)
+        database.recordIfNewer("new", "chan1", 5000L, expiresAt = 6000L)
+        assertEquals(1000L, queryTimestamp("old", "chan1"))
     }
 
     private fun queryTimestamp(notificationId: String, channelId: String): Long? {
