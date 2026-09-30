@@ -89,12 +89,49 @@ class NotificationHistoryDatabaseTest {
     }
 
     @Test
+    fun `recordLocalStart twice for the same key updates the stored timestamp`() {
+        val first = System.currentTimeMillis()
+        val second = first + 5000L
+        database.recordLocalStart("id1", "chan1", first)
+        // A second local start for the same (id, channel) upserts the single row with the newer
+        // time - it must not add a second row.
+        database.recordLocalStart("id1", "chan1", second)
+        assertEquals(second, database.consumeLocalStart("id1", "chan1"))
+        // Only one row existed, so the catch-up can fire exactly once.
+        assertNull(database.consumeLocalStart("id1", "chan1"))
+    }
+
+    @Test
+    fun `recordLocalStart does not move the stored timestamp backwards`() {
+        val later = System.currentTimeMillis()
+        val earlier = later - 5000L
+        database.recordLocalStart("id1", "chan1", later)
+        // An older repeat local start for the same key is ignored (update-if-newer only).
+        database.recordLocalStart("id1", "chan1", earlier)
+        assertEquals(later, database.consumeLocalStart("id1", "chan1"))
+    }
+
+    @Test
     fun `recordLocalStart evicts entries older than the 28 day TTL`() {
         val nowMillis = System.currentTimeMillis()
         database.recordLocalStart("stale", "chan1", nowMillis - TimeUnit.DAYS.toMillis(29))
         database.recordLocalStart("fresh", "chan1", nowMillis)
         assertNull(database.consumeLocalStart("stale", "chan1"))
         assertEquals(nowMillis, database.consumeLocalStart("fresh", "chan1"))
+    }
+
+    @Test
+    fun `deleteExpired also evicts stale local starts and keeps fresh ones`() {
+        val nowSeconds = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis())
+        val nowMillis = TimeUnit.SECONDS.toMillis(nowSeconds)
+        // Both rows are fresh when written (so recordLocalStart's on-write eviction keeps them).
+        database.recordLocalStart("aged", "chan1", nowMillis)
+        database.recordLocalStart("survivor", "chan1", nowMillis + TimeUnit.DAYS.toMillis(40))
+        // Simulate the post-render cleanup pass running 29 days later: "aged" is now past the
+        // 28-day TTL, "survivor" is not.
+        database.deleteExpired(now = nowSeconds + TimeUnit.DAYS.toSeconds(29))
+        assertNull(database.consumeLocalStart("aged", "chan1"))
+        assertEquals(nowMillis + TimeUnit.DAYS.toMillis(40), database.consumeLocalStart("survivor", "chan1"))
     }
 
     @Test

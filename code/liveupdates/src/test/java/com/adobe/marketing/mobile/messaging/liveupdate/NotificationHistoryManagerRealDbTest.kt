@@ -165,6 +165,83 @@ class NotificationHistoryManagerRealDbTest {
         }
     }
 
+    @Test
+    fun `two local starts then one backend event fire a single localstart catch-up`() {
+        val ctx = RuntimeEnvironment.getApplication()
+        val now = System.currentTimeMillis() / 1000
+        val local = LiveUpdatePayload.create(
+            notificationId = "dup-id", channelId = "dup-chan",
+            eventType = LiveUpdatePayload.EVENT_TYPE_LOCAL_START, title = "Local", timestamp = now
+        )
+        val update = LiveUpdatePayload.create(
+            notificationId = "dup-id", channelId = "dup-chan",
+            eventType = LiveUpdatePayload.EVENT_TYPE_UPDATE, title = "Update", timestamp = now + 10,
+            xdm = JSONObject().put("mixins", JSONObject().put("campaignMarker", "camp-dup"))
+        )
+
+        // The same live activity is started locally twice. Neither local start dispatches a
+        // tracking event, and the second only upserts the single registry row (no eviction).
+        mockStatic(MobileCore::class.java).use { m ->
+            LiveUpdates.dispatchLiveUpdateEventTracking(ctx, local)
+            LiveUpdates.dispatchLiveUpdateEventTracking(ctx, local)
+            m.verify({ MobileCore.dispatchEvent(any()) }, never())
+        }
+
+        // The first backend event fires exactly ONE localstart catch-up (not two) plus the
+        // regular update: 2 events total.
+        mockStatic(MobileCore::class.java).use { m ->
+            LiveUpdates.dispatchLiveUpdateEventTracking(ctx, update)
+            val captor = ArgumentCaptor.forClass(Event::class.java)
+            m.verify({ MobileCore.dispatchEvent(captor.capture()) }, times(2))
+            val events = captor.allValues.map { liveActivityEventOf(it) }
+            assertEquals(1, events.count { it == "liveupdate_localstart" })
+            assertEquals(1, events.count { it == "liveupdate_update" })
+        }
+    }
+
+    @Test
+    fun `local start caught up by a backend start emits localstart then liveupdate_start`() {
+        assertCatchUpSubtype(LiveUpdatePayload.EVENT_TYPE_START, "liveupdate_start")
+    }
+
+    @Test
+    fun `local start caught up by a backend end emits localstart then liveupdate_end`() {
+        assertCatchUpSubtype(LiveUpdatePayload.EVENT_TYPE_END, "liveupdate_end")
+    }
+
+    /**
+     * Records a local start then dispatches a backend event of [backendEventType], asserting the
+     * catch-up rides as `liveupdate_localstart` and the backend event keeps its own subtype
+     * ([expectedSubtype]) - i.e. start stays start, update stays update, end stays end.
+     */
+    private fun assertCatchUpSubtype(backendEventType: String, expectedSubtype: String) {
+        val ctx = RuntimeEnvironment.getApplication()
+        val now = System.currentTimeMillis() / 1000
+        val id = "sub-$backendEventType"
+        val local = LiveUpdatePayload.create(
+            notificationId = id, channelId = "sub-chan",
+            eventType = LiveUpdatePayload.EVENT_TYPE_LOCAL_START, title = "Local", timestamp = now
+        )
+        val backend = LiveUpdatePayload.create(
+            notificationId = id, channelId = "sub-chan",
+            eventType = backendEventType, title = "Backend", timestamp = now + 10,
+            xdm = JSONObject().put("mixins", JSONObject().put("campaignMarker", "camp-sub"))
+        )
+
+        mockStatic(MobileCore::class.java).use { m ->
+            LiveUpdates.dispatchLiveUpdateEventTracking(ctx, local)
+            m.verify({ MobileCore.dispatchEvent(any()) }, never())
+        }
+        mockStatic(MobileCore::class.java).use { m ->
+            LiveUpdates.dispatchLiveUpdateEventTracking(ctx, backend)
+            val captor = ArgumentCaptor.forClass(Event::class.java)
+            m.verify({ MobileCore.dispatchEvent(captor.capture()) }, times(2))
+            val events = captor.allValues.map { liveActivityEventOf(it) }
+            assertEquals(1, events.count { it == "liveupdate_localstart" })
+            assertEquals(1, events.count { it == expectedSubtype })
+        }
+    }
+
     @Suppress("UNCHECKED_CAST")
     private fun xdmOf(event: Event): Map<String, Any?> =
         event.eventData!!["xdm"] as Map<String, Any?>

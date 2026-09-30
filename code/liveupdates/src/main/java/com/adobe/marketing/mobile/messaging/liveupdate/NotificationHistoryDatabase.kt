@@ -110,6 +110,16 @@ internal class NotificationHistoryDatabase internal constructor(private val data
         }
     }
 
+    /**
+     * Evicts expired rows from both tables in a single pass, off the render path (called by
+     * [NotificationHistoryManager.evictExpiredAsync] after a notification is posted):
+     *  - `notification_history`: rows whose `expiresAt` (epoch seconds) is before [now] (seconds).
+     *  - `local_started_live_updates`: rows whose `eventTimestamp` (epoch millis) is older than
+     *    [LOCAL_START_TTL_MILLIS]. This gives the local-start registry a guaranteed cleanup pass
+     *    rather than relying only on the opportunistic on-write eviction in [recordLocalStart].
+     *
+     * @return the number of expired `notification_history` rows deleted.
+     */
     fun deleteExpired(now: Long): Int {
         synchronized(dbMutex) {
             var database: SQLiteDatabase? = null
@@ -118,11 +128,19 @@ internal class NotificationHistoryDatabase internal constructor(private val data
                     databasePath,
                     SQLiteDatabaseHelper.DatabaseOpenMode.READ_WRITE
                 )
-                return database.delete(
+                val historyDeleted = database.delete(
                     TABLE_NAME,
                     "$COLUMN_EXPIRES_AT < ?",
                     arrayOf(now.toString())
                 )
+                val localStartCutoffMillis =
+                    TimeUnit.SECONDS.toMillis(now) - LOCAL_START_TTL_MILLIS
+                database.delete(
+                    TABLE_LOCAL_STARTS,
+                    "$COLUMN_EVENT_TIMESTAMP < ?",
+                    arrayOf(localStartCutoffMillis.toString())
+                )
+                return historyDeleted
             } finally {
                 SQLiteDatabaseHelper.closeDatabase(database)
             }
@@ -151,15 +169,19 @@ internal class NotificationHistoryDatabase internal constructor(private val data
 
     /**
      * Records that the Live Update identified by ([notificationId], [channelId]) was started
-     * locally at [eventTimestampMillis] (epoch milliseconds). Upserts the row.
+     * locally at [eventTimestampMillis] (epoch milliseconds).
+     *
+     * If the (notificationId, channelId) is already registered (the same live activity was started
+     * locally again), the single row's timestamp is updated in place to the newer time - it never
+     * moves backwards and never adds a second row. A plain update-if-newer is used rather than
+     * INSERT-OR-REPLACE (no delete/reinsert) and rather than a native SQLite UPSERT (which needs
+     * SQLite 3.24 / API 30+, above this SDK's minSdk); it mirrors [recordIfNewer] for the
+     * timestamp-history table.
      *
      * Opportunistically evicts entries older than [LOCAL_START_TTL_MILLIS] (a locally-started
-     * activity that never received a backend update/end would otherwise linger).
-     *
-     * TODO(local-start-cleanup): this on-write eviction only runs when another local start is
-     *   recorded. For guaranteed cleanup of stale entries, revisit with either a periodic/external
-     *   task or an eviction pass tied to notification render. Aligned with the timestamp table's
-     *   own eviction approach.
+     * activity that never received a backend update/end would otherwise linger). This on-write
+     * pass is a cheap backstop; the guaranteed cleanup runs post-render via [deleteExpired]
+     * (see [NotificationHistoryManager.evictExpiredAsync]), which now evicts this table too.
      */
     fun recordLocalStart(notificationId: String, channelId: String, eventTimestampMillis: Long) {
         synchronized(dbMutex) {
@@ -169,17 +191,32 @@ internal class NotificationHistoryDatabase internal constructor(private val data
                     databasePath,
                     SQLiteDatabaseHelper.DatabaseOpenMode.READ_WRITE
                 )
-                val contentValues = ContentValues().apply {
-                    put(COLUMN_NOTIFICATION_ID, notificationId)
-                    put(COLUMN_CHANNEL_ID, channelId)
-                    put(COLUMN_EVENT_TIMESTAMP, eventTimestampMillis)
+                val whereClause = "$COLUMN_NOTIFICATION_ID = ? AND $COLUMN_CHANNEL_ID = ?"
+                val whereArgs = arrayOf(notificationId, channelId)
+                val existing = database.rawQuery(
+                    "SELECT $COLUMN_EVENT_TIMESTAMP FROM $TABLE_LOCAL_STARTS WHERE $whereClause",
+                    whereArgs
+                ).use { if (it.moveToFirst()) it.getLong(0) else null }
+
+                if (existing == null) {
+                    val contentValues = ContentValues().apply {
+                        put(COLUMN_NOTIFICATION_ID, notificationId)
+                        put(COLUMN_CHANNEL_ID, channelId)
+                        put(COLUMN_EVENT_TIMESTAMP, eventTimestampMillis)
+                    }
+                    database.insertWithOnConflict(
+                        TABLE_LOCAL_STARTS,
+                        null,
+                        contentValues,
+                        SQLiteDatabase.CONFLICT_REPLACE
+                    )
+                } else if (eventTimestampMillis > existing) {
+                    val contentValues = ContentValues().apply {
+                        put(COLUMN_EVENT_TIMESTAMP, eventTimestampMillis)
+                    }
+                    database.update(TABLE_LOCAL_STARTS, contentValues, whereClause, whereArgs)
                 }
-                database.insertWithOnConflict(
-                    TABLE_LOCAL_STARTS,
-                    null,
-                    contentValues,
-                    SQLiteDatabase.CONFLICT_REPLACE
-                )
+
                 val cutoff = System.currentTimeMillis() - LOCAL_START_TTL_MILLIS
                 database.delete(TABLE_LOCAL_STARTS, "$COLUMN_EVENT_TIMESTAMP < ?", arrayOf(cutoff.toString()))
             } finally {

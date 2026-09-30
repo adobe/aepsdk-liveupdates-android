@@ -155,7 +155,8 @@ internal object NotificationHistoryManager {
     }
 
     /**
-     * Deletes expired history rows on the background executor without blocking the caller.
+     * Deletes expired rows from both the timestamp-history and local-start tables on the
+     * background executor without blocking the caller (see [NotificationHistoryDatabase.deleteExpired]).
      * Meant to be called after the notification is posted so deletion adds no render latency.
      * Failures are logged and swallowed.
      */

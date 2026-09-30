@@ -60,7 +60,7 @@ class LiveUpdatesTest {
         setCachedDatasetId(null)
         mobileCoreMock.close()
     }
-    
+
     // =====================================================================
     // Listener registration
     // =====================================================================
