@@ -402,34 +402,6 @@ object LiveUpdates {
     // ---------- Topic subscription tracking ----------
 
     /**
-     * Dispatches a tracking event indicating the device has successfully subscribed to
-     * an FCM topic. Fired by the host application after
-     * [com.google.firebase.messaging.FirebaseMessaging.subscribeToTopic] completes
-     * successfully. Topic subscribe / unsubscribe themselves are intentionally NOT part of
-     * the SDK's public API - the application owns that mechanic - the SDK only exposes the
-     * tracking dispatch so subscribe events land in AJO reporting alongside the receive
-     * lifecycle events.
-     *
-     * Outbound XDM: `pushChannelContext.liveActivity.event = "topic_subscribed"`,
-     * `channelID = <topic>`, `liveActivityID` populated when a [notificationId] is provided
-     * (e.g. when the subscription is triggered from an `onStart` Live Update listener).
-     *
-     * @param topic the FCM topic name (no `/topics/` prefix)
-     * @param notificationId the Live Update `notification_id` that triggered the
-     *   subscription, or `null` when the subscription is not tied to a specific chip
-     */
-    @JvmStatic
-    @JvmOverloads
-    fun trackTopicSubscribed(topic: String, notificationId: String? = null) {
-        dispatchTopicTracking(
-            topic = topic,
-            event = EVENT_VALUE_TOPIC_SUBSCRIBED,
-            notificationId = notificationId,
-            incomingXdm = null
-        )
-    }
-
-    /**
      * Live-Update-triggered variant of [trackTopicSubscribed]. Use this when the subscription
      * was raised in response to a Live Update (e.g. from an `onStart` callback): the full
      * [payload] is threaded in so the topic event correlates to the originating campaign /
@@ -442,36 +414,12 @@ object LiveUpdates {
      * @param payload the Live Update payload that triggered the subscription
      */
     @JvmStatic
-    fun trackTopicSubscribed(topic: String, payload: LiveUpdatePayload) {
+    fun trackTopicSubscribed(payload: LiveUpdatePayload) {
         dispatchTopicTracking(
-            topic = topic,
+            topic = payload.topicName ?: "",
             event = EVENT_VALUE_TOPIC_SUBSCRIBED,
             notificationId = payload.notificationId,
             incomingXdm = payload.xdm
-        )
-    }
-
-    /**
-     * Dispatches a tracking event indicating the device has successfully unsubscribed
-     * from an FCM topic. Companion to [trackTopicSubscribed] - fire after
-     * [com.google.firebase.messaging.FirebaseMessaging.unsubscribeFromTopic] completes
-     * successfully.
-     *
-     * Outbound XDM: `pushChannelContext.liveActivity.event = "topic_unsubscribed"`,
-     * `channelID = <topic>`, `liveActivityID` populated when a [notificationId] is provided.
-     *
-     * @param topic the FCM topic name
-     * @param notificationId the Live Update `notification_id` that triggered the
-     *   unsubscription, or `null` when the unsubscription is not tied to a specific chip
-     */
-    @JvmStatic
-    @JvmOverloads
-    fun trackTopicUnsubscribed(topic: String, notificationId: String? = null) {
-        dispatchTopicTracking(
-            topic = topic,
-            event = EVENT_VALUE_TOPIC_UNSUBSCRIBED,
-            notificationId = notificationId,
-            incomingXdm = null
         )
     }
 
@@ -485,9 +433,9 @@ object LiveUpdates {
      * @param payload the Live Update payload that triggered the unsubscription
      */
     @JvmStatic
-    fun trackTopicUnsubscribed(topic: String, payload: LiveUpdatePayload) {
+    fun trackTopicUnsubscribed(payload: LiveUpdatePayload) {
         dispatchTopicTracking(
-            topic = topic,
+            topic = payload.topicName ?: "",
             event = EVENT_VALUE_TOPIC_UNSUBSCRIBED,
             notificationId = payload.notificationId,
             incomingXdm = payload.xdm
