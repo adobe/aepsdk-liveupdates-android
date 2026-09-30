@@ -18,8 +18,8 @@ import androidx.core.app.NotificationCompat
  * apply to this push — `ProgressStyle` on API 36+, `MetricStyle` on API 37+, or any future
  * promotion-eligible style.
  *
- * Returning `null` causes [LiveUpdatePlugin] to drop the push with a warning log; the
- * SDK does not fall back to any default style.
+ * Returning `null` makes [LiveUpdatePlugin] post the notification without a style (the SDK
+ * applies no default style) and dispatch a `renderError` / `style_null` diagnostic event.
  *
  * Design split: the envelope root carries SDK-canonical fields (parsed into typed properties
  * on [LiveUpdatePayload]), while `content_state` carries app-defined dynamic state. The

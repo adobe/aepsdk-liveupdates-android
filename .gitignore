@@ -102,3 +102,6 @@ demo-curl.sh
 *.postman_collection.json
 *.postman_environment.json
 .scout/
+
+# Local-only Claude Code project instructions — never commit.
+code/CLAUDE.md

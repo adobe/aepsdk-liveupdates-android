@@ -14,6 +14,8 @@ package com.adobe.marketing.mobile.messaging.liveupdate
 import android.content.Context
 import android.content.Intent
 import com.adobe.marketing.mobile.Event
+import com.adobe.marketing.mobile.EventSource
+import com.adobe.marketing.mobile.EventType
 import com.adobe.marketing.mobile.MobileCore
 import com.adobe.marketing.mobile.plugin.ILiveupdatePlugin
 import com.google.firebase.messaging.RemoteMessage
@@ -57,15 +59,6 @@ class LiveUpdatesTest {
         LiveUpdates.setLiveUpdateInterceptor(null)
         setCachedDatasetId(null)
         mobileCoreMock.close()
-    }
-
-    // =====================================================================
-    // extensionVersion
-    // =====================================================================
-
-    @Test
-    fun `extensionVersion returns the SDK version`() {
-        assertEquals("0.0.1", LiveUpdates.extensionVersion())
     }
 
     // =====================================================================
@@ -188,10 +181,32 @@ class LiveUpdatesTest {
         val calls = mutableListOf<String>()
         LiveUpdates.setLiveUpdateListener(recordingListener(calls))
         val p = payload(eventType = LiveUpdatePayload.EVENT_TYPE_START)
+        val message = remoteMessageForEnvelope(p.toEnvelopeJson(), defaultXdm().toString())
+        LiveUpdates.trackLiveUpdateEvent(mock(Context::class.java), message)
+        assertEquals("liveupdate_start", liveActivity(xdmMap(captureEvent()))["event"])
+        assertEquals(listOf("received", "start"), calls)
+    }
+
+    @Test
+    fun `trackLiveUpdateEvent without _xdm dispatches nothing but still invokes listener`() {
+        val calls = mutableListOf<String>()
+        LiveUpdates.setLiveUpdateListener(recordingListener(calls))
+        val p = payload(eventType = LiveUpdatePayload.EVENT_TYPE_START, xdm = null)
         val message = remoteMessageForEnvelope(p.toEnvelopeJson())
         LiveUpdates.trackLiveUpdateEvent(mock(Context::class.java), message)
-        captureEvent()
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
         assertEquals(listOf("received", "start"), calls)
+    }
+
+    @Test
+    fun `trackLiveUpdateEvent with malformed _xdm dispatches nothing but still invokes listener`() {
+        val calls = mutableListOf<String>()
+        LiveUpdates.setLiveUpdateListener(recordingListener(calls))
+        val p = payload(eventType = LiveUpdatePayload.EVENT_TYPE_UPDATE, xdm = null)
+        val message = remoteMessageForEnvelope(p.toEnvelopeJson(), "{not-json")
+        LiveUpdates.trackLiveUpdateEvent(mock(Context::class.java), message)
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
+        assertEquals(listOf("received", "update"), calls)
     }
 
     // =====================================================================
@@ -294,12 +309,15 @@ class LiveUpdatesTest {
         val intent = mock(Intent::class.java)
         `when`(intent.getStringExtra(LiveUpdates.EXTRA_NOTIFICATION_ID)).thenReturn("id1")
         `when`(intent.getStringExtra(LiveUpdates.EXTRA_CHANNEL_ID)).thenReturn("topicA")
+        `when`(intent.getStringExtra(LiveUpdates.EXTRA_XDM)).thenReturn(defaultXdm().toString())
 
         val result = LiveUpdates.handleNotificationResponse(intent, true)
 
         assertTrue(result)
         val xdm = xdmMap(captureEvent())
         assertEquals("liveUpdateTracking.applicationOpened", xdm["eventType"])
+        assertEquals("camp-default", xdm["campaignID"])
+        assertEquals("topicA", liveActivity(xdm)["channelID"])
         assertNull(liveActivity(xdm)["event"])
     }
 
@@ -307,6 +325,7 @@ class LiveUpdatesTest {
     fun `handleNotificationResponse dispatches customAction tracking for action button or dismiss`() {
         val intent = mock(Intent::class.java)
         `when`(intent.getStringExtra(LiveUpdates.EXTRA_NOTIFICATION_ID)).thenReturn("id1")
+        `when`(intent.getStringExtra(LiveUpdates.EXTRA_XDM)).thenReturn(defaultXdm().toString())
 
         val result = LiveUpdates.handleNotificationResponse(intent, false, "Dismiss")
 
@@ -319,13 +338,52 @@ class LiveUpdatesTest {
     }
 
     @Test
-    fun `handleNotificationResponse tolerates malformed xdm extra`() {
-        val intent = mock(Intent::class.java)
-        `when`(intent.getStringExtra(LiveUpdates.EXTRA_NOTIFICATION_ID)).thenReturn("id1")
-        `when`(intent.getStringExtra(LiveUpdates.EXTRA_XDM)).thenReturn("{not-json")
+    fun `handleNotificationResponse tap returns true but dispatches nothing when xdm extra missing`() {
+        assertInteractionSkipped(xdmExtra = null, applicationOpened = true, customActionId = null)
+    }
 
-        assertTrue(LiveUpdates.handleNotificationResponse(intent, true))
-        captureEvent()
+    @Test
+    fun `handleNotificationResponse tap returns true but dispatches nothing when xdm extra empty`() {
+        assertInteractionSkipped(xdmExtra = "", applicationOpened = true, customActionId = null)
+    }
+
+    @Test
+    fun `handleNotificationResponse tap returns true but dispatches nothing when xdm extra malformed`() {
+        assertInteractionSkipped(xdmExtra = "{not-json", applicationOpened = true, customActionId = null)
+    }
+
+    @Test
+    fun `handleNotificationResponse customAction returns true but dispatches nothing when xdm extra missing`() {
+        assertInteractionSkipped(xdmExtra = null, applicationOpened = false, customActionId = "Dismiss")
+    }
+
+    @Test
+    fun `handleNotificationResponse customAction returns true but dispatches nothing when xdm extra empty`() {
+        assertInteractionSkipped(xdmExtra = "", applicationOpened = false, customActionId = "Dismiss")
+    }
+
+    @Test
+    fun `handleNotificationResponse customAction returns true but dispatches nothing when xdm extra malformed`() {
+        assertInteractionSkipped(xdmExtra = "{not-json", applicationOpened = false, customActionId = "Dismiss")
+    }
+
+    @Test
+    fun `dispatchInteractionTracking with null xdm dispatches nothing`() {
+        LiveUpdates.dispatchInteractionTracking(
+            notificationId = "id1",
+            topicName = "topicA",
+            incomingXdm = null,
+            applicationOpened = true,
+            customActionId = null
+        )
+        LiveUpdates.dispatchInteractionTracking(
+            notificationId = "id1",
+            topicName = "topicA",
+            incomingXdm = null,
+            applicationOpened = false,
+            customActionId = "Dismiss"
+        )
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
     }
 
     @Test
@@ -333,7 +391,7 @@ class LiveUpdatesTest {
         LiveUpdates.dispatchInteractionTracking(
             notificationId = "id1",
             topicName = null,
-            incomingXdm = null,
+            incomingXdm = defaultXdm(),
             applicationOpened = false,
             customActionId = null
         )
@@ -345,64 +403,36 @@ class LiveUpdatesTest {
     // =====================================================================
 
     @Test
-    fun `trackTopicSubscribed lightweight overload dispatches topic_subscribed`() {
-        LiveUpdates.trackTopicSubscribed("topicA")
+    fun `trackTopicSubscribed dispatches topic tracking when payload has xdm`() {
+        LiveUpdates.trackTopicSubscribed(payload(topicName = "topicA", notificationId = "notifT"))
         val xdm = xdmMap(captureEvent())
         assertEquals("liveUpdateTracking.topic", xdm["eventType"])
+        assertEquals("camp-default", xdm["campaignID"])
         val la = liveActivity(xdm)
         assertEquals("topic_subscribed", la["event"])
         assertEquals("topicA", la["channelID"])
-        assertFalse(la.containsKey("liveActivityID"))
+        assertEquals("notifT", la["liveActivityID"])
     }
 
     @Test
-    fun `trackTopicSubscribed with notificationId includes liveActivityID`() {
-        LiveUpdates.trackTopicSubscribed("topicA", "notif1")
-        val la = liveActivity(xdmMap(captureEvent()))
-        assertEquals("notif1", la["liveActivityID"])
+    fun `trackTopicUnsubscribed dispatches topic tracking when payload has xdm`() {
+        LiveUpdates.trackTopicUnsubscribed(payload(topicName = "topicA"))
+        val xdm = xdmMap(captureEvent())
+        assertEquals("liveUpdateTracking.topic", xdm["eventType"])
+        assertEquals("topic_unsubscribed", liveActivity(xdm)["event"])
     }
 
     @Test
-    fun `trackTopicSubscribed payload overload threads payload xdm and notificationId`() {
-        val xdm = JSONObject().put("campaignID", "camp9")
-        val p = payload(eventType = LiveUpdatePayload.EVENT_TYPE_START, xdm = xdm, notificationId = "notifX")
-
-        LiveUpdates.trackTopicSubscribed("topicA", p)
-
-        val xdmMap = xdmMap(captureEvent())
-        assertEquals("camp9", xdmMap["campaignID"])
-        assertEquals("notifX", liveActivity(xdmMap)["liveActivityID"])
-        assertEquals("topic_subscribed", liveActivity(xdmMap)["event"])
+    fun `trackTopicSubscribed and trackTopicUnsubscribed skip dispatch when xdm is null`() {
+        LiveUpdates.trackTopicSubscribed(payload(topicName = "topicA", xdm = null))
+        LiveUpdates.trackTopicUnsubscribed(payload(topicName = "topicA", xdm = null))
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
     }
 
     @Test
-    fun `trackTopicUnsubscribed lightweight overload dispatches topic_unsubscribed`() {
-        LiveUpdates.trackTopicUnsubscribed("topicB")
-        assertEquals("topic_unsubscribed", liveActivity(xdmMap(captureEvent()))["event"])
-    }
-
-    @Test
-    fun `trackTopicUnsubscribed with notificationId includes liveActivityID`() {
-        LiveUpdates.trackTopicUnsubscribed("topicB", "notif2")
-        assertEquals("notif2", liveActivity(xdmMap(captureEvent()))["liveActivityID"])
-    }
-
-    @Test
-    fun `trackTopicUnsubscribed payload overload threads payload xdm and notificationId`() {
-        val xdm = JSONObject().put("campaignID", "camp7")
-        val p = payload(eventType = LiveUpdatePayload.EVENT_TYPE_END, xdm = xdm, notificationId = "notifY")
-
-        LiveUpdates.trackTopicUnsubscribed("topicB", p)
-
-        val xdmMap = xdmMap(captureEvent())
-        assertEquals("camp7", xdmMap["campaignID"])
-        assertEquals("notifY", liveActivity(xdmMap)["liveActivityID"])
-        assertEquals("topic_unsubscribed", liveActivity(xdmMap)["event"])
-    }
-
-    @Test
-    fun `dispatchTopicTracking skips dispatch when topic is empty`() {
-        LiveUpdates.trackTopicSubscribed("")
+    fun `trackTopicSubscribed and trackTopicUnsubscribed skip dispatch when topic is empty`() {
+        LiveUpdates.trackTopicSubscribed(payload(topicName = null))
+        LiveUpdates.trackTopicUnsubscribed(payload(topicName = ""))
         mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
     }
 
@@ -430,12 +460,14 @@ class LiveUpdatesTest {
     }
 
     @Test
-    fun `dispatchLiveUpdateEventTracking maps localstart to liveupdate_start`() {
+    fun `dispatchLiveUpdateEventTracking does NOT dispatch tracking for a local start`() {
+        // A locally-triggered start has no backend _xdm, so no receive tracking event is
+        // dispatched; the start is registered for a later catch-up instead (DB fails open here).
         LiveUpdates.dispatchLiveUpdateEventTracking(
             mock(Context::class.java),
             payload(eventType = LiveUpdatePayload.EVENT_TYPE_LOCAL_START)
         )
-        assertEquals("liveupdate_start", liveActivity(xdmMap(captureEvent()))["event"])
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
     }
 
     @Test
@@ -445,6 +477,21 @@ class LiveUpdatesTest {
             payload(eventType = LiveUpdatePayload.EVENT_TYPE_UPDATE)
         )
         assertEquals("liveupdate_update", liveActivity(xdmMap(captureEvent()))["event"])
+    }
+
+    @Test
+    fun `dispatchLiveUpdateEventTracking skips dispatch for start, update and end with null xdm`() {
+        listOf(
+            LiveUpdatePayload.EVENT_TYPE_START,
+            LiveUpdatePayload.EVENT_TYPE_UPDATE,
+            LiveUpdatePayload.EVENT_TYPE_END
+        ).forEach { eventType ->
+            LiveUpdates.dispatchLiveUpdateEventTracking(
+                mock(Context::class.java),
+                payload(eventType = eventType, topicName = "topicA", xdm = null)
+            )
+        }
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
     }
 
     @Test
@@ -478,7 +525,7 @@ class LiveUpdatesTest {
         val messageProfile = cjm(xdm)["messageProfile"] as Map<String, Any?>
         @Suppress("UNCHECKED_CAST")
         val channel = messageProfile["channel"] as Map<String, Any?>
-        assertEquals("https://ns.adobe.com/xdm/channels/push", channel["_id"])
+        assertEquals("https://ns.adobe.com/xdm/channels/liveactivity", channel["_id"])
     }
 
     @Test
@@ -584,6 +631,74 @@ class LiveUpdatesTest {
     }
 
     // =====================================================================
+    // Render error / incompatibility events (Event Hub only)
+    // =====================================================================
+
+    @Test
+    fun `dispatchRenderErrorEvent dispatches an Event Hub event, not an experience event`() {
+        LiveUpdates.dispatchRenderErrorEvent(
+            subcategory = LiveUpdates.ERROR_SUBCATEGORY_STYLE_NULL,
+            payload = payload(notificationId = "notif1", topicName = "topicA")
+        )
+        val event = captureEvent()
+        // Event Hub only: MESSAGING + ERROR_RESPONSE_CONTENT (never EDGE + REQUEST_CONTENT,
+        // which is what routes the experience tracking events to Edge / AJO).
+        assertEquals(EventType.MESSAGING, event.type)
+        assertEquals(EventSource.ERROR_RESPONSE_CONTENT, event.source)
+        val xdm = xdmMap(event)
+        assertEquals("liveUpdateTracking.renderError", xdm["eventType"])
+        val la = liveActivity(xdm)
+        assertEquals(LiveUpdates.ERROR_SUBCATEGORY_STYLE_NULL, la["event"])
+        assertEquals("notif1", la["liveActivityID"])
+        assertEquals("topicA", la["channelID"])
+    }
+
+    @Test
+    fun `dispatchIncompatibleEvent dispatches an Event Hub incompatible event`() {
+        LiveUpdates.dispatchIncompatibleEvent(
+            subcategory = LiveUpdates.INCOMPATIBLE_SUBCATEGORY_DEVICE_API_BELOW_36,
+            payload = payload(notificationId = "notif2")
+        )
+        val event = captureEvent()
+        assertEquals(EventType.MESSAGING, event.type)
+        assertEquals(EventSource.ERROR_RESPONSE_CONTENT, event.source)
+        val xdm = xdmMap(event)
+        assertEquals("liveUpdateTracking.incompatible", xdm["eventType"])
+        assertEquals(
+            LiveUpdates.INCOMPATIBLE_SUBCATEGORY_DEVICE_API_BELOW_36,
+            liveActivity(xdm)["event"]
+        )
+    }
+
+    @Test
+    fun `error events never carry a dataset override even when one is configured`() {
+        // The dataset override only makes sense for events routed to Edge. These stay on the hub.
+        setCachedDatasetId("dataset123")
+        LiveUpdates.dispatchRenderErrorEvent(
+            subcategory = LiveUpdates.ERROR_SUBCATEGORY_APP_DISCARDED,
+            payload = payload()
+        )
+        val event = captureEvent()
+        assertFalse(event.eventData!!.containsKey("meta"))
+    }
+
+    @Test
+    fun `error events merge the incoming xdm passthrough`() {
+        val xdm = JSONObject().put(
+            "mixins",
+            JSONObject().put("messageExecution", JSONObject().put("messageExecutionID", "exec1"))
+        )
+        LiveUpdates.dispatchRenderErrorEvent(
+            subcategory = LiveUpdates.ERROR_SUBCATEGORY_APP_DISCARDED,
+            payload = payload(notificationId = "notif1", xdm = xdm)
+        )
+        val xdmMap = xdmMap(captureEvent())
+        @Suppress("UNCHECKED_CAST")
+        val messageExecution = xdmMap["messageExecution"] as Map<String, Any?>
+        assertEquals("exec1", messageExecution["messageExecutionID"])
+    }
+
+    // =====================================================================
     // notifyDismissed
     // =====================================================================
 
@@ -622,7 +737,7 @@ class LiveUpdatesTest {
                 received = payload
             }
         })
-        val p = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_END, "T")
+        val p = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_END, "T", 1000L)
         val intent = mock(Intent::class.java)
         `when`(intent.getStringExtra(LiveUpdates.EXTRA_PAYLOAD)).thenReturn(p.toEnvelopeJson())
 
@@ -639,7 +754,7 @@ class LiveUpdatesTest {
                 throw RuntimeException("boom")
             }
         })
-        val p = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_END, "T")
+        val p = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_END, "T", 1000L)
         val intent = mock(Intent::class.java)
         `when`(intent.getStringExtra(LiveUpdates.EXTRA_PAYLOAD)).thenReturn(p.toEnvelopeJson())
 
@@ -650,6 +765,16 @@ class LiveUpdatesTest {
     // =====================================================================
     // Test helpers
     // =====================================================================
+
+    private fun assertInteractionSkipped(xdmExtra: String?, applicationOpened: Boolean, customActionId: String?) {
+        val intent = mock(Intent::class.java)
+        `when`(intent.getStringExtra(LiveUpdates.EXTRA_NOTIFICATION_ID)).thenReturn("id1")
+        `when`(intent.getStringExtra(LiveUpdates.EXTRA_CHANNEL_ID)).thenReturn("topicA")
+        `when`(intent.getStringExtra(LiveUpdates.EXTRA_XDM)).thenReturn(xdmExtra)
+
+        assertTrue(LiveUpdates.handleNotificationResponse(intent, applicationOpened, customActionId))
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
+    }
 
     private fun interceptorReturning(result: Boolean): ILiveUpdateInterceptor =
         object : ILiveUpdateInterceptor {
@@ -677,16 +802,20 @@ class LiveUpdatesTest {
     private fun payload(
         eventType: String = LiveUpdatePayload.EVENT_TYPE_START,
         topicName: String? = null,
-        xdm: JSONObject? = null,
+        xdm: JSONObject? = defaultXdm(),
         notificationId: String = "notif-default"
     ): LiveUpdatePayload = LiveUpdatePayload.create(
         notificationId = notificationId,
         channelId = "chan",
         eventType = eventType,
         title = "Title",
+        timestamp = 1000L,
         topicName = topicName,
         xdm = xdm
     )
+
+    private fun defaultXdm(): JSONObject =
+        JSONObject().put("mixins", JSONObject().put("campaignID", "camp-default"))
 
     private fun remoteMessageForEnvelope(envelopeJson: String, xdmRaw: String? = null): RemoteMessage {
         val message = mock(RemoteMessage::class.java)

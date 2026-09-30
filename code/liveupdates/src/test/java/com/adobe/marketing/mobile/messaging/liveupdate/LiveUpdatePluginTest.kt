@@ -15,6 +15,9 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import androidx.core.app.NotificationCompat
+import com.adobe.marketing.mobile.Event
+import com.adobe.marketing.mobile.EventSource
+import com.adobe.marketing.mobile.EventType
 import com.adobe.marketing.mobile.MobileCore
 import com.google.firebase.messaging.RemoteMessage
 import org.junit.After
@@ -23,8 +26,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.any
 import org.mockito.MockedStatic
+import org.mockito.Mockito.atLeastOnce
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.mockStatic
 import org.mockito.Mockito.never
@@ -33,6 +38,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
@@ -40,6 +46,11 @@ class LiveUpdatePluginTest {
 
     private lateinit var mobileCoreMock: MockedStatic<MobileCore>
     private val context = RuntimeEnvironment.getApplication()
+
+    // Payloads posted through postLiveUpdate() now run through NotificationHistoryManager's
+    // staleness check (payloads older than 28 days are dropped before rendering), so tests
+    // that exercise the full post path need a "now"-ish timestamp, not an arbitrary constant.
+    private val nowSeconds = System.currentTimeMillis() / 1000
 
     @Before
     fun setUp() {
@@ -88,20 +99,31 @@ class LiveUpdatePluginTest {
     }
 
     @Test
-    fun `handleLiveUpdatePush drops the push when interceptor vetoes`() {
+    fun `handleLiveUpdatePush drops the push and reports render_error app_discarded when interceptor vetoes`() {
         LiveUpdates.setLiveUpdateInterceptor(interceptorReturning(false))
-        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create(
+            "id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds, topicName = "topicA"
+        )
 
         handler().handleLiveUpdatePush(context, remoteMessage(payload))
 
         assertTrue(shadowOf(notificationManager()).allNotifications.isEmpty())
-        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
+        // Exactly one Event Hub event: the render_error diagnostic. No render / tracking follows.
+        val events = capturedEvents()
+        assertEquals(1, events.size)
+        val error = events[0]
+        assertEquals(EventType.MESSAGING, error.type)
+        assertEquals(EventSource.ERROR_RESPONSE_CONTENT, error.source)
+        assertEquals("liveUpdateTracking.renderError", categoryOf(error))
+        assertEquals(LiveUpdates.ERROR_SUBCATEGORY_APP_DISCARDED, subcategoryOf(error))
+        assertEquals("id1", liveActivityIdOf(error))
+        assertEquals("topicA", channelIdOf(error))
     }
 
     @Test
     fun `handleLiveUpdatePush proceeds and posts when interceptor allows`() {
         LiveUpdates.setLiveUpdateInterceptor(interceptorReturning(true))
-        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
 
         handler().handleLiveUpdatePush(context, remoteMessage(payload))
 
@@ -109,13 +131,62 @@ class LiveUpdatePluginTest {
     }
 
     @Test
-    fun `postLiveUpdate drops the push when style provider returns null`() {
-        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T")
+    fun `postLiveUpdate still posts without a style and reports render_error style_null when style provider returns null`() {
+        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
 
         handler(style = null).postLiveUpdate(context, payload)
 
+        // The notification still posts, just without a promoted style.
+        assertEquals(1, shadowOf(notificationManager()).allNotifications.size)
+        val error = capturedEvents().single {
+            subcategoryOf(it) == LiveUpdates.ERROR_SUBCATEGORY_STYLE_NULL
+        }
+        assertEquals(EventType.MESSAGING, error.type)
+        assertEquals(EventSource.ERROR_RESPONSE_CONTENT, error.source)
+        assertEquals("liveUpdateTracking.renderError", categoryOf(error))
+    }
+
+    @Test
+    fun `postLiveUpdate drops the push and reports render_error invalid_timestamp when the timestamp is stale`() {
+        val staleTimestamp = nowSeconds - TimeUnit.DAYS.toSeconds(29)
+        val payload = LiveUpdatePayload.create(
+            "id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", staleTimestamp, topicName = "topicA"
+        )
+
+        handler().postLiveUpdate(context, payload)
+
         assertTrue(shadowOf(notificationManager()).allNotifications.isEmpty())
-        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
+        // Exactly one Event Hub event: the render_error invalid_timestamp diagnostic. Nothing renders.
+        val events = capturedEvents()
+        assertEquals(1, events.size)
+        val error = events[0]
+        assertEquals(EventType.MESSAGING, error.type)
+        assertEquals(EventSource.ERROR_RESPONSE_CONTENT, error.source)
+        assertEquals("liveUpdateTracking.renderError", categoryOf(error))
+        assertEquals(LiveUpdates.ERROR_SUBCATEGORY_INVALID_TIMESTAMP, subcategoryOf(error))
+        assertEquals("id1", liveActivityIdOf(error))
+        assertEquals("topicA", channelIdOf(error))
+    }
+
+    @Test
+    fun `postLiveUpdate drops the push and reports render_error invalid_event_type for an unknown event_type`() {
+        val payload = LiveUpdatePayload.create(
+            "id1", "chan", "some_random_state", "T", nowSeconds, topicName = "topicA"
+        )
+
+        handler().postLiveUpdate(context, payload)
+
+        // Unknown event_type: nothing renders, and exactly one render-error diagnostic fires.
+        assertTrue(shadowOf(notificationManager()).allNotifications.isEmpty())
+        val events = capturedEvents()
+        assertEquals(1, events.size)
+        val error = events[0]
+        assertEquals(EventType.MESSAGING, error.type)
+        assertEquals(EventSource.ERROR_RESPONSE_CONTENT, error.source)
+        assertEquals("liveUpdateTracking.renderError", categoryOf(error))
+        assertEquals(LiveUpdates.ERROR_SUBCATEGORY_INVALID_EVENT_TYPE, subcategoryOf(error))
+        assertEquals("id1", liveActivityIdOf(error))
+        assertEquals("topicA", channelIdOf(error))
     }
 
     @Test
@@ -135,9 +206,10 @@ class LiveUpdatePluginTest {
             channelId = "chan",
             eventType = LiveUpdatePayload.EVENT_TYPE_START,
             title = "Title",
+            timestamp = nowSeconds,
             body = "Body",
             criticalText = "Crit",
-            whenMillis = 1234L
+            whenSeconds = 1234L
         )
 
         handler().postLiveUpdate(context, payload)
@@ -147,7 +219,48 @@ class LiveUpdatePluginTest {
         val notification = posted[0]
         assertTrue(notification.flags and Notification.FLAG_ONGOING_EVENT != 0)
         assertEquals(listOf("received", "start"), calls)
-        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) })
+        // At least the receive tracking event dispatches. On this API 33 test target an
+        // incompatible (device_api_below_36) diagnostic also fires; asserted separately below.
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, atLeastOnce())
+    }
+
+    @Test
+    fun `postLiveUpdate reports incompatible device_api_below_36 on a pre-36 device`() {
+        // Test target runs at API 33 (see class @Config), so promotion to a chip is impossible.
+        val payload = LiveUpdatePayload.create(
+            "id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds, topicName = "topicA"
+        )
+
+        handler().postLiveUpdate(context, payload)
+
+        // The notification still posts (as a normal ongoing notification).
+        assertEquals(1, shadowOf(notificationManager()).allNotifications.size)
+        val incompatible = capturedEvents().single {
+            categoryOf(it) == "liveUpdateTracking.incompatible"
+        }
+        assertEquals(EventType.MESSAGING, incompatible.type)
+        assertEquals(EventSource.ERROR_RESPONSE_CONTENT, incompatible.source)
+        assertEquals(
+            LiveUpdates.INCOMPATIBLE_SUBCATEGORY_DEVICE_API_BELOW_36,
+            subcategoryOf(incompatible)
+        )
+        assertEquals("id1", liveActivityIdOf(incompatible))
+        assertEquals("topicA", channelIdOf(incompatible))
+    }
+
+    @Test
+    fun `postLiveUpdate reports render_error notification_permission_missing when notifications are disabled`() {
+        shadowOf(notificationManager()).setNotificationsEnabled(false)
+        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
+
+        handler().postLiveUpdate(context, payload)
+
+        val permissionError = capturedEvents().single {
+            subcategoryOf(it) == LiveUpdates.ERROR_SUBCATEGORY_NOTIFICATION_PERMISSION_MISSING
+        }
+        assertEquals(EventType.MESSAGING, permissionError.type)
+        assertEquals(EventSource.ERROR_RESPONSE_CONTENT, permissionError.source)
+        assertEquals("liveUpdateTracking.renderError", categoryOf(permissionError))
     }
 
     @Test
@@ -157,6 +270,7 @@ class LiveUpdatePluginTest {
             channelId = "chan",
             eventType = LiveUpdatePayload.EVENT_TYPE_END,
             title = "Title",
+            timestamp = nowSeconds,
             dismissAfterSeconds = 5L
         )
 
@@ -173,6 +287,7 @@ class LiveUpdatePluginTest {
             channelId = "chan",
             eventType = LiveUpdatePayload.EVENT_TYPE_END,
             title = "Title",
+            timestamp = nowSeconds,
             dismissAfterSeconds = 0L
         )
 
@@ -189,6 +304,7 @@ class LiveUpdatePluginTest {
             channelId = "chan",
             eventType = LiveUpdatePayload.EVENT_TYPE_START,
             title = "Title",
+            timestamp = nowSeconds,
             dismissAfterSeconds = 5L
         )
 
@@ -200,7 +316,7 @@ class LiveUpdatePluginTest {
 
     @Test
     fun `postLiveUpdate never adds notification action buttons`() {
-        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
 
         handler().postLiveUpdate(context, payload)
 
@@ -210,7 +326,7 @@ class LiveUpdatePluginTest {
 
     @Test
     fun `postLiveUpdate creates the channel with high importance when not pre-registered`() {
-        val payload = LiveUpdatePayload.create("id1", "chan-new", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan-new", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
 
         handler().postLiveUpdate(context, payload)
 
@@ -224,7 +340,7 @@ class LiveUpdatePluginTest {
         nm.createNotificationChannel(
             NotificationChannel("chan-existing", "Existing", NotificationManager.IMPORTANCE_LOW)
         )
-        val payload = LiveUpdatePayload.create("id1", "chan-existing", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan-existing", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
 
         handler().postLiveUpdate(context, payload)
 
@@ -248,6 +364,7 @@ class LiveUpdatePluginTest {
                 channelId = "chan",
                 eventType = LiveUpdatePayload.EVENT_TYPE_START,
                 title = "Title",
+                timestamp = nowSeconds,
                 priority = priority
             )
             handler().postLiveUpdate(context, payload)
@@ -264,6 +381,7 @@ class LiveUpdatePluginTest {
             channelId = "chan",
             eventType = LiveUpdatePayload.EVENT_TYPE_START,
             title = "T",
+            timestamp = nowSeconds,
             smallIcon = "test_liveupdate_icon"
         )
 
@@ -285,6 +403,7 @@ class LiveUpdatePluginTest {
             channelId = "chan",
             eventType = LiveUpdatePayload.EVENT_TYPE_START,
             title = "T",
+            timestamp = nowSeconds,
             smallIcon = "no_such_drawable_exists"
         )
 
@@ -297,7 +416,7 @@ class LiveUpdatePluginTest {
     @Config(sdk = [21])
     @Test
     fun `ensureChannelExists is a no-op below API 26`() {
-        val payload = LiveUpdatePayload.create("id1", "chan-old", LiveUpdatePayload.EVENT_TYPE_START, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan-old", LiveUpdatePayload.EVENT_TYPE_START, "T", nowSeconds)
 
         // Should not throw even though NotificationManager#createNotificationChannel doesn't
         // exist pre-O; postLiveUpdate should still post the notification normally.
@@ -310,4 +429,31 @@ class LiveUpdatePluginTest {
         val nm = context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as NotificationManager
         assertEquals(1, shadowOf(nm).allNotifications.size)
     }
+
+    // ---- Event Hub error-event capture helpers ----
+
+    /** All events passed to [MobileCore.dispatchEvent] during the test, in dispatch order. */
+    private fun capturedEvents(): List<Event> {
+        val captor = ArgumentCaptor.forClass(Event::class.java)
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(captor.capture()) }, atLeastOnce())
+        return captor.allValues
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun xdmOf(event: Event): Map<String, Any?> =
+        event.eventData!!["xdm"] as Map<String, Any?>
+
+    private fun categoryOf(event: Event): String? = xdmOf(event)["eventType"] as? String
+
+    @Suppress("UNCHECKED_CAST")
+    private fun liveActivityOf(event: Event): Map<String, Any?> {
+        val experience = xdmOf(event)["_experience"] as Map<String, Any?>
+        val cjm = experience["customerJourneyManagement"] as Map<String, Any?>
+        val pushChannelContext = cjm["pushChannelContext"] as Map<String, Any?>
+        return pushChannelContext["liveActivity"] as Map<String, Any?>
+    }
+
+    private fun subcategoryOf(event: Event): String? = liveActivityOf(event)["event"] as? String
+    private fun liveActivityIdOf(event: Event): String? = liveActivityOf(event)["liveActivityID"] as? String
+    private fun channelIdOf(event: Event): String? = liveActivityOf(event)["channelID"] as? String
 }
