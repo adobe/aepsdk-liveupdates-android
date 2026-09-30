@@ -37,7 +37,6 @@ class LiveUpdatesApplication : Application() {
 
     // Fill in with your own Assurance session URL (from Assurance > Create Session) to
     // debug this sample app with Assurance.
-    private val ASSURANCE_SESSION_URL = ""
 
     private val STAGING = true
 
@@ -86,7 +85,6 @@ class LiveUpdatesApplication : Application() {
         LiveUpdates.setLiveUpdateInterceptor(
             SampleLiveUpdateInterceptor(applicationContext, dismissedStore)
         )
-        MobileCore.trackAction("Init", null)
 
         // Optional: react to Live Update lifecycle events from the app side. The generic
         // onLiveUpdateReceived fires for every push; onStart / onUpdate / onEnd fire next
@@ -114,6 +112,7 @@ class LiveUpdatesApplication : Application() {
                             // Pass the full payload so the subscribe event correlates to the
                             // originating campaign / journey via the push's _xdm.
                             LiveUpdates.trackTopicSubscribed(topic, payload)
+                            LiveUpdates.trackTopicSubscribed(payload)
                             Log.d(TAG, "Subscribed to topic '$topic' (triggered by Live Update start).")
                         } else {
                             Log.w(TAG, "subscribeToTopic($topic) failed: ${task.exception?.localizedMessage}")
@@ -170,6 +169,7 @@ class LiveUpdatesApplication : Application() {
                     // Pass the full payload so the unsubscribe event correlates to the
                     // originating campaign / journey via the push's _xdm.
                     LiveUpdates.trackTopicUnsubscribed(topic, payload)
+                    LiveUpdates.trackTopicUnsubscribed(payload)
                     Log.d(TAG, "Unsubscribed from topic '$topic' (triggered by Live Update end).")
                 } else {
                     Log.w(TAG, "unsubscribeFromTopic($topic) failed: ${task.exception?.localizedMessage}")
