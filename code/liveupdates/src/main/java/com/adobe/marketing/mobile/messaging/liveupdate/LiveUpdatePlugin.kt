@@ -158,7 +158,6 @@ class LiveUpdatePlugin(
             .setRequestPromotedOngoing(true)
             .setPriority(mapPriority(payload.priority))
             .setContentIntent(buildTapPendingIntent(context, payload))
-            .setDeleteIntent(buildDismissPendingIntent(context, payload))
         // A null style (style provider returned null) still renders, just without a promoted
         // style; the render error was already reported above.
         style?.let { builder.setStyle(it) }
@@ -172,6 +171,8 @@ class LiveUpdatePlugin(
             payload.dismissAfterSeconds?.takeIf { it > 0L }?.let {
                 builder.setTimeoutAfter(TimeUnit.SECONDS.toMillis(it))
             }
+        } else {
+            builder.setDeleteIntent(buildDismissPendingIntent(context, payload))
         }
 
         val notification = builder.build()
