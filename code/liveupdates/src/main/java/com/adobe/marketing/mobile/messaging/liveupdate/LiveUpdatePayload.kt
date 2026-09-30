@@ -29,18 +29,24 @@ import org.json.JSONObject
  *  - `notification_id`
  *  - `notification_channel_id`
  *  - `event_type`
- *  - `title`
+ *  - `timestamp`
+ *
+ * `title` is optional. The platform requires a `contentTitle` to promote a notification to a
+ * Live Update chip, so a title-less payload still parses and renders but degrades to a normal
+ * ongoing notification (surfaced via the `incompatible` diagnostic). Styles differ in whether a
+ * title is visually needed, so the SDK does not hard-require it.
  */
 class LiveUpdatePayload private constructor(
     // SDK-canonical fields (drive NotificationCompat.Builder calls and event tracking)
     val notificationId: String,
     val channelId: String,
     val eventType: String,
-    val title: String,
+    val title: String?,
+    val timestamp: Long,
     val priority: String?,
     val body: String?,
     val criticalText: String?,
-    val whenMillis: Long?,
+    val whenSeconds: Long?,
     val dismissAfterSeconds: Long?,
     val contentState: JSONObject?,
 
@@ -61,12 +67,23 @@ class LiveUpdatePayload private constructor(
 ) {
 
     /**
+     * True when [eventType] is one of the values the SDK renders and tracks:
+     * `start` / `update` / `end`, plus the app-raised `localstart`. A payload whose
+     * `event_type` is anything else is an unrecognized state and is dropped by the renderer.
+     */
+    internal val isCanonicalEventType: Boolean
+        get() = eventType == EVENT_TYPE_START ||
+            eventType == EVENT_TYPE_UPDATE ||
+            eventType == EVENT_TYPE_END ||
+            eventType == EVENT_TYPE_LOCAL_START
+
+    /**
      * Concise, log-friendly representation. The default (non-data-class) `toString()` would
      * only print the object hash, so this surfaces the key identifying fields instead.
      */
     override fun toString(): String =
         "LiveUpdatePayload(notificationId=$notificationId, eventType=$eventType, " +
-            "channelId=$channelId, title=$title, topicName=$topicName)"
+            "channelId=$channelId, title=$title, timestamp=$timestamp, topicName=$topicName)"
 
     /**
      * Serializes this payload back into the SDK-canonical envelope JSON (the same shape
@@ -80,11 +97,12 @@ class LiveUpdatePayload private constructor(
         obj.put(KEY_NOTIFICATION_ID, notificationId)
         obj.put(KEY_CHANNEL_ID, channelId)
         obj.put(KEY_EVENT_TYPE, eventType)
-        obj.put(KEY_TITLE, title)
+        title?.let { obj.put(KEY_TITLE, it) }
+        obj.put(KEY_TIMESTAMP, timestamp)
         priority?.let { obj.put(KEY_PRIORITY, it) }
         body?.let { obj.put(KEY_BODY, it) }
         criticalText?.let { obj.put(KEY_CRITICAL_TEXT, it) }
-        whenMillis?.let { obj.put(KEY_WHEN, it) }
+        whenSeconds?.let { obj.put(KEY_WHEN, it) }
         dismissAfterSeconds?.let { obj.put(KEY_DISMISS_AFTER, it) }
         contentState?.let { obj.put(KEY_CONTENT_STATE, it) }
         topicName?.let { obj.put(KEY_TOPIC_NAME, it) }
@@ -100,6 +118,7 @@ class LiveUpdatePayload private constructor(
         private const val KEY_CHANNEL_ID = "notification_channel_id"
         private const val KEY_EVENT_TYPE = "event_type"
         private const val KEY_TITLE = "title"
+        private const val KEY_TIMESTAMP = "timestamp"
         private const val KEY_PRIORITY = "priority"
         private const val KEY_BODY = "body"
         private const val KEY_CRITICAL_TEXT = "critical_text"
@@ -111,6 +130,11 @@ class LiveUpdatePayload private constructor(
 
         // FCM data map key for the XDM passthrough block.
         private const val DATA_KEY_XDM = "_xdm"
+
+        // Upper bound used to sanity-check that `timestamp` is actually seconds and not
+        // accidentally millis (a millis value would be ~1000x this, i.e. in the trillions).
+        // ~10 billion seconds is roughly the year 2286 — far past any real Live Update.
+        private const val MAX_PLAUSIBLE_TIMESTAMP_SECONDS = 10_000_000_000L
 
         /** Canonical Live Update event_type values the SDK dispatches tracking + listener callbacks for. */
         const val EVENT_TYPE_START = "start"
@@ -129,8 +153,15 @@ class LiveUpdatePayload private constructor(
          * intermediate `RemoteMessage`. Primary use case is
          * [LiveUpdates.triggerLocalLiveUpdate], where the host app raises a Live Update
          * chip programmatically. Required inputs match the envelope's required fields
-         * (`notification_id`, `notification_channel_id`, `event_type`, `title`); everything else is
-         * optional and defaults to `null` / absent.
+         * (`notification_id`, `notification_channel_id`, `event_type`, `timestamp`);
+         * everything else, including `title`, is optional and defaults to `null` / absent.
+         *
+         * @param title optional; a title-less payload still renders but will not promote to a
+         * Live Update chip (the platform requires a `contentTitle` for promotion).
+         * @param timestamp epoch **seconds**, matching the backend envelope's `timestamp` field.
+         * Used for staleness/regression checks in [NotificationHistoryManager]. As a guard rail,
+         * a value that is implausibly large for seconds (e.g. epoch millis) is converted to
+         * seconds rather than being misread as a far-future timestamp.
          */
         @JvmStatic
         @JvmOverloads
@@ -138,11 +169,12 @@ class LiveUpdatePayload private constructor(
             notificationId: String,
             channelId: String,
             eventType: String,
-            title: String,
+            title: String?,
+            timestamp: Long,
             priority: String? = null,
             body: String? = null,
             criticalText: String? = null,
-            whenMillis: Long? = null,
+            whenSeconds: Long? = null,
             dismissAfterSeconds: Long? = null,
             contentState: JSONObject? = null,
             topicName: String? = null,
@@ -153,16 +185,37 @@ class LiveUpdatePayload private constructor(
             channelId = channelId,
             eventType = eventType,
             title = title,
+            timestamp = normalizeToEpochSeconds(timestamp),
             priority = priority,
             body = body,
             criticalText = criticalText,
-            whenMillis = whenMillis,
+            whenSeconds = whenSeconds,
             dismissAfterSeconds = dismissAfterSeconds,
             contentState = contentState,
             topicName = topicName,
             smallIcon = smallIcon,
             xdm = xdm
         )
+
+        /**
+         * Guard rail for app-built payloads: if [timestamp] is too large to be epoch seconds
+         * (epoch millis, or finer), scales it down by 1000s until it is. Values already in
+         * seconds are returned untouched.
+         */
+        private fun normalizeToEpochSeconds(timestamp: Long): Long {
+            var seconds = timestamp
+            while (seconds > MAX_PLAUSIBLE_TIMESTAMP_SECONDS) {
+                seconds /= 1000
+            }
+            if (seconds != timestamp) {
+                Log.warning(
+                    LiveUpdatesConstants.LOG_TAG,
+                    SELF_TAG,
+                    "Live Update timestamp $timestamp is not epoch seconds; converted to $seconds."
+                )
+            }
+            return seconds
+        }
 
         /** Fast detection - does this [message] carry the Live Update envelope key? */
         @JvmStatic
@@ -172,7 +225,7 @@ class LiveUpdatePayload private constructor(
         /**
          * Parses [message] into a [LiveUpdatePayload]. Returns `null` when the envelope is
          * absent, malformed, or missing any required field (`notification_id`,
-         * `notification_channel_id`, `event_type`, `title`).
+         * `notification_channel_id`, `event_type`, `timestamp`). `title` is optional.
          */
         @JvmStatic
         fun parse(message: RemoteMessage): LiveUpdatePayload? {
@@ -205,7 +258,10 @@ class LiveUpdatePayload private constructor(
             val notificationId = obj.requiredString(KEY_NOTIFICATION_ID) ?: return null
             val channelId = obj.requiredString(KEY_CHANNEL_ID) ?: return null
             val eventType = obj.requiredString(KEY_EVENT_TYPE) ?: return null
-            val title = obj.requiredString(KEY_TITLE) ?: return null
+            // title is optional: a title-less payload still parses (it renders but will not be
+            // promoted to a chip, since the platform requires a contentTitle for promotion).
+            val title = obj.optString(KEY_TITLE).takeIf { it.isNotEmpty() }
+            val timestamp = obj.secondsTimestamp(KEY_TIMESTAMP, required = true) ?: return null
 
             // Parse the _xdm block as a typed JSONObject. Opaque to the SDK; null when
             // absent or unparseable. Carried through to the tracking dispatch so AJO
@@ -228,10 +284,11 @@ class LiveUpdatePayload private constructor(
                 channelId = channelId,
                 eventType = eventType,
                 title = title,
+                timestamp = timestamp,
                 priority = obj.optString(KEY_PRIORITY).takeIf { it.isNotEmpty() },
                 body = obj.optString(KEY_BODY).takeIf { it.isNotEmpty() },
                 criticalText = obj.optString(KEY_CRITICAL_TEXT).takeIf { it.isNotEmpty() },
-                whenMillis = if (obj.has(KEY_WHEN)) obj.optLong(KEY_WHEN) else null,
+                whenSeconds = obj.secondsTimestamp(KEY_WHEN, required = false),
                 dismissAfterSeconds = if (obj.has(KEY_DISMISS_AFTER)) obj.optLong(KEY_DISMISS_AFTER) else null,
                 contentState = obj.optJSONObject(KEY_CONTENT_STATE),
                 topicName = obj.optString(KEY_TOPIC_NAME).takeIf { it.isNotEmpty() },
@@ -251,6 +308,37 @@ class LiveUpdatePayload private constructor(
                     SELF_TAG,
                     "adb_liveupdate_data missing required field '$key'"
                 )
+            }
+            return value
+        }
+
+        /**
+         * Reads [key] as an epoch-seconds timestamp, validating it's plausible (rejects
+         * `<= 0` or values so large they look like millis sent by mistake). A missing key is
+         * only logged when [required] - callers use this for both the required `timestamp`
+         * field (missing/invalid fails the whole payload via `?: return null`) and the
+         * optional `when` field (missing is fine; invalid just drops that one field, since
+         * `when` is cosmetic display only and shouldn't fail the whole payload).
+         */
+        private fun JSONObject.secondsTimestamp(key: String, required: Boolean): Long? {
+            if (!has(key)) {
+                if (required) {
+                    Log.debug(
+                        LiveUpdatesConstants.LOG_TAG,
+                        SELF_TAG,
+                        "adb_liveupdate_data missing required field '$key'"
+                    )
+                }
+                return null
+            }
+            val value = optLong(key)
+            if (value !in 1..MAX_PLAUSIBLE_TIMESTAMP_SECONDS) {
+                Log.debug(
+                    LiveUpdatesConstants.LOG_TAG,
+                    SELF_TAG,
+                    "adb_liveupdate_data field '$key' is not a valid epoch seconds timestamp: $value"
+                )
+                return null
             }
             return value
         }

@@ -12,6 +12,7 @@
 package com.adobe.marketing.mobile.liveupdatessample
 
 import android.app.Application
+import android.content.Intent
 import android.util.Log
 import com.adobe.marketing.mobile.Assurance
 import com.adobe.marketing.mobile.Edge
@@ -19,10 +20,7 @@ import com.adobe.marketing.mobile.Lifecycle
 import com.adobe.marketing.mobile.LoggingMode
 import com.adobe.marketing.mobile.Messaging
 import com.adobe.marketing.mobile.MobileCore
-import com.adobe.marketing.mobile.edge.identity.AuthenticatedState
 import com.adobe.marketing.mobile.edge.identity.Identity
-import com.adobe.marketing.mobile.edge.identity.IdentityItem
-import com.adobe.marketing.mobile.edge.identity.IdentityMap
 import com.adobe.marketing.mobile.messaging.liveupdate.ILiveUpdateListener
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePlugin
 import com.adobe.marketing.mobile.messaging.liveupdate.LiveUpdatePayload
@@ -71,21 +69,14 @@ class LiveUpdatesApplication : Application() {
             // Primary identity demonstration. AJO uses this to correlate server-side
             // reporting and inbound campaigns. Replace the placeholder address with the
             // identifier your app authenticates the user with.
-            val identityMap = IdentityMap().apply {
-                addItem(
-                    IdentityItem("cuc_liveupdate@adobe.com", AuthenticatedState.AUTHENTICATED, true),
-                    "Email"
-                )
-            }
-            Identity.updateIdentities(identityMap)
         }
         MobileCore.addPlugins(LiveUpdatePlugin(SampleLiveUpdateStyleProvider(applicationContext)))
-        // Assurance.startSession(ASSURANCE_SESSION_URL)
+        if(ASSURANCE_SESSION_URL.isNotEmpty())
+            Assurance.startSession(ASSURANCE_SESSION_URL)
         val dismissedStore = DismissedLiveUpdateStore(applicationContext)
         LiveUpdates.setLiveUpdateInterceptor(
             SampleLiveUpdateInterceptor(applicationContext, dismissedStore)
         )
-        MobileCore.trackAction("Init", null)
 
         // Optional: react to Live Update lifecycle events from the app side. The generic
         // onLiveUpdateReceived fires for every push; onStart / onUpdate / onEnd fire next
@@ -112,7 +103,7 @@ class LiveUpdatesApplication : Application() {
                         if (task.isSuccessful) {
                             // Pass the full payload so the subscribe event correlates to the
                             // originating campaign / journey via the push's _xdm.
-                            LiveUpdates.trackTopicSubscribed(topic, payload)
+                            LiveUpdates.trackTopicSubscribed(payload)
                             Log.d(TAG, "Subscribed to topic '$topic' (triggered by Live Update start).")
                         } else {
                             Log.w(TAG, "subscribeToTopic($topic) failed: ${task.exception?.localizedMessage}")
@@ -144,6 +135,20 @@ class LiveUpdatesApplication : Application() {
                 }
                 unsubscribeFromTopic(payload)
             }
+
+            override fun onClick(payload: LiveUpdatePayload) {
+                // Opening the app / choosing the destination on a chip tap is the APP's
+                // responsibility - the SDK only fires applicationOpened tracking and this
+                // callback, it does not open the app or resolve any deep link. Here the sample
+                // simply brings its own MainActivity to the foreground. A real app can route to a
+                // specific screen using fields from the payload (notificationId, topicName, or
+                // custom keys in contentState).
+                Log.d(TAG, "Live Update CLICK: id=${payload.notificationId}; opening the app")
+                val intent = Intent(applicationContext, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                }
+                startActivity(intent)
+            }
         })
     }
 
@@ -154,7 +159,7 @@ class LiveUpdatesApplication : Application() {
                 if (task.isSuccessful) {
                     // Pass the full payload so the unsubscribe event correlates to the
                     // originating campaign / journey via the push's _xdm.
-                    LiveUpdates.trackTopicUnsubscribed(topic, payload)
+                    LiveUpdates.trackTopicUnsubscribed(payload)
                     Log.d(TAG, "Unsubscribed from topic '$topic' (triggered by Live Update end).")
                 } else {
                     Log.w(TAG, "unsubscribeFromTopic($topic) failed: ${task.exception?.localizedMessage}")

@@ -39,7 +39,7 @@ on:
       messaging-dependency:
         description: 'The Messaging dependency version in gradle.properties to be validated (ex: 1.2.3).'
         type: string
-        required: true
+        required: false
 
 jobs:
   publish:

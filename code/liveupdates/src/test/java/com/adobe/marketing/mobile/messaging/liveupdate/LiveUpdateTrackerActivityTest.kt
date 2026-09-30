@@ -25,6 +25,7 @@ import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.any
 import org.mockito.MockedStatic
 import org.mockito.Mockito.mockStatic
+import org.mockito.Mockito.never
 import org.mockito.Mockito.times
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
@@ -49,12 +50,15 @@ class LiveUpdateTrackerActivityTest {
         LiveUpdates.setLiveUpdateListener(null)
     }
 
-    private fun tapIntent(withPayload: Boolean = false): Intent {
+    private fun tapIntent(withPayload: Boolean = false, withXdm: Boolean = true): Intent {
         val intent = Intent(RuntimeEnvironment.getApplication(), LiveUpdateTrackerActivity::class.java)
         intent.putExtra(LiveUpdates.EXTRA_NOTIFICATION_ID, "id1")
         intent.putExtra(LiveUpdates.EXTRA_EVENT_TYPE, LiveUpdatePayload.EVENT_TYPE_START)
+        if (withXdm) {
+            intent.putExtra(LiveUpdates.EXTRA_XDM, """{"campaignID":"camp1"}""")
+        }
         if (withPayload) {
-            val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T")
+            val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_START, "T", 1000L)
             intent.putExtra(LiveUpdates.EXTRA_PAYLOAD, payload.toEnvelopeJson())
         }
         return intent
@@ -92,6 +96,25 @@ class LiveUpdateTrackerActivityTest {
             .create()
 
         assertEquals("id1", clicked?.notificationId)
+    }
+
+    @Test
+    fun `chip tap without xdm extra invokes onClick and finishes but dispatches no tracking`() {
+        var clicked: LiveUpdatePayload? = null
+        LiveUpdates.setLiveUpdateListener(object : ILiveUpdateListener {
+            override fun onClick(payload: LiveUpdatePayload) {
+                clicked = payload
+            }
+        })
+
+        val activity = Robolectric.buildActivity(
+            LiveUpdateTrackerActivity::class.java,
+            tapIntent(withPayload = true, withXdm = false)
+        ).create().get()
+
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
+        assertEquals("id1", clicked?.notificationId)
+        assertTrue(activity.isFinishing)
     }
 
     @Test

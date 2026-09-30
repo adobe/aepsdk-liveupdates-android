@@ -68,10 +68,11 @@ class LiveUpdateInteractionReceiverTest {
             }
         })
 
-        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_END, "T")
+        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_END, "T", 1000L)
         val intent = mock(Intent::class.java)
         `when`(intent.action).thenReturn(LiveUpdateInteractionReceiver.ACTION_DISMISS)
         `when`(intent.getStringExtra(LiveUpdates.EXTRA_NOTIFICATION_ID)).thenReturn("id1")
+        `when`(intent.getStringExtra(LiveUpdates.EXTRA_XDM)).thenReturn("""{"campaignID":"camp1"}""")
         `when`(intent.getStringExtra(LiveUpdates.EXTRA_PAYLOAD)).thenReturn(payload.toEnvelopeJson())
 
         receiver.onReceive(mock(Context::class.java), intent)
@@ -84,6 +85,28 @@ class LiveUpdateInteractionReceiverTest {
         assertEquals("liveUpdateTracking.customAction", xdm["eventType"])
 
         // Listener was notified with the re-hydrated payload.
+        assertNotNull(dismissedPayload)
+        assertEquals("id1", dismissedPayload!!.notificationId)
+    }
+
+    @Test
+    fun `onReceive on ACTION_DISMISS without xdm extra notifies listener but dispatches no tracking`() {
+        var dismissedPayload: LiveUpdatePayload? = null
+        LiveUpdates.setLiveUpdateListener(object : ILiveUpdateListener {
+            override fun onDismissed(payload: LiveUpdatePayload) {
+                dismissedPayload = payload
+            }
+        })
+
+        val payload = LiveUpdatePayload.create("id1", "chan", LiveUpdatePayload.EVENT_TYPE_END, "T", 1000L)
+        val intent = mock(Intent::class.java)
+        `when`(intent.action).thenReturn(LiveUpdateInteractionReceiver.ACTION_DISMISS)
+        `when`(intent.getStringExtra(LiveUpdates.EXTRA_NOTIFICATION_ID)).thenReturn("id1")
+        `when`(intent.getStringExtra(LiveUpdates.EXTRA_PAYLOAD)).thenReturn(payload.toEnvelopeJson())
+
+        receiver.onReceive(mock(Context::class.java), intent)
+
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
         assertNotNull(dismissedPayload)
         assertEquals("id1", dismissedPayload!!.notificationId)
     }

@@ -177,11 +177,6 @@ fun TopicsScreen(fcmToken: String?, onBack: () -> Unit) {
                                     failPrefix = "Failed to subscribe to \"$topic\""
                                 )
                                 Log.d(TAG, "subscribeToTopic($topic) -> ${task.isSuccessful}", task.exception)
-                                if (task.isSuccessful) {
-                                    // Manual subscribe from the topics screen - no live update
-                                    // context, so notificationId is null.
-                                    LiveUpdates.trackTopicSubscribed(topic)
-                                }
                             }
                     },
                     modifier = Modifier.fillMaxWidth().weight(1f)
@@ -205,9 +200,6 @@ fun TopicsScreen(fcmToken: String?, onBack: () -> Unit) {
                                     failPrefix = "Failed to unsubscribe from \"$topic\""
                                 )
                                 Log.d(TAG, "unsubscribeFromTopic($topic) -> ${task.isSuccessful}", task.exception)
-                                if (task.isSuccessful) {
-                                    LiveUpdates.trackTopicUnsubscribed(topic)
-                                }
                             }
                     },
                     modifier = Modifier.fillMaxWidth().weight(1f)
