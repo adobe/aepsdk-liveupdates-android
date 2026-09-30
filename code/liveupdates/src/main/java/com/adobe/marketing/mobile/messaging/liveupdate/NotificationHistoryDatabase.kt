@@ -16,6 +16,7 @@ import android.database.sqlite.SQLiteDatabase
 import com.adobe.marketing.mobile.internal.util.SQLiteDatabaseHelper
 import com.adobe.marketing.mobile.services.Log
 import com.adobe.marketing.mobile.services.ServiceProvider
+import java.util.concurrent.TimeUnit
 
 /**
  * Local history of the last timestamp seen per (notificationId, channelId), backed by a raw
@@ -43,8 +44,22 @@ internal class NotificationHistoryDatabase internal constructor(private val data
                 "$COLUMN_TIMESTAMP INTEGER NOT NULL, " +
                 "$COLUMN_EXPIRES_AT INTEGER NOT NULL, " +
                 "PRIMARY KEY ($COLUMN_NOTIFICATION_ID, $COLUMN_CHANNEL_ID));"
+        // Registry of Live Updates started locally via LiveUpdates.triggerLocalLiveUpdate. Keyed by
+        // (notificationId, channelId); eventTimestamp is epoch MILLISECONDS captured when the local
+        // start happened - the same clock/unit an Event's own timestamp uses, so the deferred
+        // localstart tracking event can be stamped with it. (The history table's `timestamp` is
+        // epoch seconds from the payload, used only for stale-update checks.) An entry is removed
+        // when the first backend update/end arrives for it (the localstart catch-up), see
+        // consumeLocalStart.
+        val localStartTableQuery =
+            "CREATE TABLE IF NOT EXISTS $TABLE_LOCAL_STARTS (" +
+                "$COLUMN_NOTIFICATION_ID TEXT NOT NULL, " +
+                "$COLUMN_CHANNEL_ID TEXT NOT NULL, " +
+                "$COLUMN_EVENT_TIMESTAMP INTEGER NOT NULL, " +
+                "PRIMARY KEY ($COLUMN_NOTIFICATION_ID, $COLUMN_CHANNEL_ID));"
         synchronized(dbMutex) {
             SQLiteDatabaseHelper.createTableIfNotExist(databasePath, tableCreationQuery)
+            SQLiteDatabaseHelper.createTableIfNotExist(databasePath, localStartTableQuery)
         }
     }
 
@@ -132,6 +147,78 @@ internal class NotificationHistoryDatabase internal constructor(private val data
         }
     }
 
+    // ---------- Locally-started Live Update registry ----------
+
+    /**
+     * Records that the Live Update identified by ([notificationId], [channelId]) was started
+     * locally at [eventTimestampMillis] (epoch milliseconds). Upserts the row.
+     *
+     * Opportunistically evicts entries older than [LOCAL_START_TTL_MILLIS] (a locally-started
+     * activity that never received a backend update/end would otherwise linger).
+     *
+     * TODO(local-start-cleanup): this on-write eviction only runs when another local start is
+     *   recorded. For guaranteed cleanup of stale entries, revisit with either a periodic/external
+     *   task or an eviction pass tied to notification render. Aligned with the timestamp table's
+     *   own eviction approach.
+     */
+    fun recordLocalStart(notificationId: String, channelId: String, eventTimestampMillis: Long) {
+        synchronized(dbMutex) {
+            var database: SQLiteDatabase? = null
+            try {
+                database = SQLiteDatabaseHelper.openDatabase(
+                    databasePath,
+                    SQLiteDatabaseHelper.DatabaseOpenMode.READ_WRITE
+                )
+                val contentValues = ContentValues().apply {
+                    put(COLUMN_NOTIFICATION_ID, notificationId)
+                    put(COLUMN_CHANNEL_ID, channelId)
+                    put(COLUMN_EVENT_TIMESTAMP, eventTimestampMillis)
+                }
+                database.insertWithOnConflict(
+                    TABLE_LOCAL_STARTS,
+                    null,
+                    contentValues,
+                    SQLiteDatabase.CONFLICT_REPLACE
+                )
+                val cutoff = System.currentTimeMillis() - LOCAL_START_TTL_MILLIS
+                database.delete(TABLE_LOCAL_STARTS, "$COLUMN_EVENT_TIMESTAMP < ?", arrayOf(cutoff.toString()))
+            } finally {
+                SQLiteDatabaseHelper.closeDatabase(database)
+            }
+        }
+    }
+
+    /**
+     * Atomically reads and removes the locally-started registry entry for ([notificationId],
+     * [channelId]). Returns the recorded start time (epoch milliseconds) when an entry existed
+     * (the caller should fire the one-time localstart catch-up, stamped with that time), or `null`
+     * otherwise. The delete guarantees the catch-up fires only once even if several backend
+     * events arrive.
+     */
+    fun consumeLocalStart(notificationId: String, channelId: String): Long? {
+        synchronized(dbMutex) {
+            var database: SQLiteDatabase? = null
+            try {
+                database = SQLiteDatabaseHelper.openDatabase(
+                    databasePath,
+                    SQLiteDatabaseHelper.DatabaseOpenMode.READ_WRITE
+                )
+                val whereClause = "$COLUMN_NOTIFICATION_ID = ? AND $COLUMN_CHANNEL_ID = ?"
+                val whereArgs = arrayOf(notificationId, channelId)
+                val eventTimestamp = database.rawQuery(
+                    "SELECT $COLUMN_EVENT_TIMESTAMP FROM $TABLE_LOCAL_STARTS WHERE $whereClause",
+                    whereArgs
+                ).use { if (it.moveToFirst()) it.getLong(0) else null }
+                if (eventTimestamp != null) {
+                    database.delete(TABLE_LOCAL_STARTS, whereClause, whereArgs)
+                }
+                return eventTimestamp
+            } finally {
+                SQLiteDatabaseHelper.closeDatabase(database)
+            }
+        }
+    }
+
     companion object {
         private const val LOG_TAG = "NotificationHistoryDatabase"
         private const val DATABASE_NAME = "com.adobe.module.liveupdates.notificationhistory"
@@ -140,6 +227,11 @@ internal class NotificationHistoryDatabase internal constructor(private val data
         private const val COLUMN_CHANNEL_ID = "channelId"
         private const val COLUMN_TIMESTAMP = "timestamp"
         private const val COLUMN_EXPIRES_AT = "expiresAt"
+
+        // Locally-started Live Update registry (same DB, separate table).
+        private const val TABLE_LOCAL_STARTS = "local_started_live_updates"
+        private const val COLUMN_EVENT_TIMESTAMP = "eventTimestamp"
+        private val LOCAL_START_TTL_MILLIS = TimeUnit.DAYS.toMillis(28)
 
         @Volatile
         private var instance: NotificationHistoryDatabase? = null

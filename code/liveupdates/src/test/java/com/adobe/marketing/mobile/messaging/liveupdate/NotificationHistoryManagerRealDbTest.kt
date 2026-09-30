@@ -11,16 +11,23 @@
 
 package com.adobe.marketing.mobile.messaging.liveupdate
 
+import com.adobe.marketing.mobile.Event
 import com.adobe.marketing.mobile.MobileCore
+import org.json.JSONObject
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.any
 import org.mockito.Mockito.mockStatic
+import org.mockito.Mockito.never
+import org.mockito.Mockito.times
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -106,5 +113,68 @@ class NotificationHistoryManagerRealDbTest {
             assertFalse(NotificationHistoryManager.recordAndValidate(older))
             mobileCoreMock.verify { MobileCore.dispatchEvent(any()) }
         }
+    }
+
+    @Test
+    fun `local start is caught up on the next backend event exactly once`() {
+        val ctx = RuntimeEnvironment.getApplication()
+        val now = System.currentTimeMillis() / 1000
+        val local = LiveUpdatePayload.create(
+            notificationId = "lc-id", channelId = "lc-chan",
+            eventType = LiveUpdatePayload.EVENT_TYPE_LOCAL_START, title = "Local", timestamp = now
+        )
+        val update = LiveUpdatePayload.create(
+            notificationId = "lc-id", channelId = "lc-chan",
+            eventType = LiveUpdatePayload.EVENT_TYPE_UPDATE, title = "Update", timestamp = now + 10,
+            xdm = JSONObject().put("mixins", JSONObject().put("campaignMarker", "camp-123"))
+        )
+
+        // 1) Local start: registers for catch-up, dispatches NO tracking event.
+        val beforeLocalStartMillis = System.currentTimeMillis()
+        mockStatic(MobileCore::class.java).use { m ->
+            LiveUpdates.dispatchLiveUpdateEventTracking(ctx, local)
+            m.verify({ MobileCore.dispatchEvent(any()) }, never())
+        }
+        val afterLocalStartMillis = System.currentTimeMillis()
+
+        // 2) First backend update: fires the update received AND the localstart catch-up (2 events).
+        mockStatic(MobileCore::class.java).use { m ->
+            LiveUpdates.dispatchLiveUpdateEventTracking(ctx, update)
+            val captor = ArgumentCaptor.forClass(Event::class.java)
+            m.verify({ MobileCore.dispatchEvent(captor.capture()) }, times(2))
+            val liveActivityEvents = captor.allValues.map { liveActivityEventOf(it) }
+            assertTrue(liveActivityEvents.contains("liveupdate_localstart"))
+            assertTrue(liveActivityEvents.contains("liveupdate_update"))
+            // The catch-up carries the update's _xdm (copied, mixins flattened to root),
+            // correlating the start to the campaign.
+            val catchUp = captor.allValues.first { liveActivityEventOf(it) == "liveupdate_localstart" }
+            assertEquals("camp-123", xdmOf(catchUp)["campaignMarker"])
+            // ...and is stamped with when the local start happened (epoch millis captured then),
+            // not with the time the catch-up fires.
+            val catchUpMillis = java.time.Instant.parse(xdmOf(catchUp)["timestamp"] as String).toEpochMilli()
+            assertTrue(catchUpMillis in beforeLocalStartMillis..afterLocalStartMillis)
+            // The regular update event keeps no explicit timestamp (Edge stamps it at send time).
+            val updateEvent = captor.allValues.first { liveActivityEventOf(it) == "liveupdate_update" }
+            assertNull(xdmOf(updateEvent)["timestamp"])
+        }
+
+        // 3) Second backend update for the same id+channel: catch-up already consumed -> 1 event.
+        mockStatic(MobileCore::class.java).use { m ->
+            LiveUpdates.dispatchLiveUpdateEventTracking(ctx, update)
+            m.verify({ MobileCore.dispatchEvent(any()) }, times(1))
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun xdmOf(event: Event): Map<String, Any?> =
+        event.eventData!!["xdm"] as Map<String, Any?>
+
+    @Suppress("UNCHECKED_CAST")
+    private fun liveActivityEventOf(event: Event): String? {
+        val exp = xdmOf(event)["_experience"] as? Map<String, Any?> ?: return null
+        val cjm = exp["customerJourneyManagement"] as? Map<String, Any?> ?: return null
+        val pcc = cjm["pushChannelContext"] as? Map<String, Any?> ?: return null
+        val la = pcc["liveActivity"] as? Map<String, Any?> ?: return null
+        return la["event"] as? String
     }
 }

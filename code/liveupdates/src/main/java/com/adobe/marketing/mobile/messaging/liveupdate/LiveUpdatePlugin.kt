@@ -89,16 +89,6 @@ class LiveUpdatePlugin(
             )
             return
         }
-        // Consult the app-registered interceptor before any rendering / tracking / listener
-        // dispatch. A `false` verdict drops the Live Update entirely.
-        if (!LiveUpdates.shouldDisplay(payload)) {
-            Log.debug(
-                LiveUpdatesConstants.LOG_TAG, TAG,
-                "Live Update id=${payload.notificationId} discarded by ILiveUpdateInterceptor; dropping."
-            )
-            LiveUpdates.dispatchRenderErrorEvent(LiveUpdates.ERROR_SUBCATEGORY_APP_DISCARDED, payload)
-            return
-        }
         postLiveUpdate(context, payload)
     }
 
@@ -109,6 +99,16 @@ class LiveUpdatePlugin(
      * ([LiveUpdates.triggerLocalLiveUpdate]).
      */
     internal fun postLiveUpdate(context: Context, payload: LiveUpdatePayload) {
+        // Consult the app-registered interceptor before any rendering / tracking / listener
+        // dispatch. A `false` verdict drops the Live Update entirely.
+        if (!LiveUpdates.shouldDisplay(payload)) {
+            Log.debug(
+                LiveUpdatesConstants.LOG_TAG, TAG,
+                "Live Update id=${payload.notificationId} discarded by ILiveUpdateInterceptor; dropping."
+            )
+            LiveUpdates.dispatchRenderErrorEvent(LiveUpdates.ERROR_SUBCATEGORY_APP_DISCARDED, payload)
+            return
+        }
         // Reject an unrecognized event_type (anything other than start / update / end / localstart)
         // before any history or rendering work: a random state from the backend is not a Live
         // Update the SDK knows how to render, so drop it and report the render error.
@@ -158,7 +158,6 @@ class LiveUpdatePlugin(
             .setRequestPromotedOngoing(true)
             .setPriority(mapPriority(payload.priority))
             .setContentIntent(buildTapPendingIntent(context, payload))
-            .setDeleteIntent(buildDismissPendingIntent(context, payload))
         // A null style (style provider returned null) still renders, just without a promoted
         // style; the render error was already reported above.
         style?.let { builder.setStyle(it) }
@@ -172,6 +171,8 @@ class LiveUpdatePlugin(
             payload.dismissAfterSeconds?.takeIf { it > 0L }?.let {
                 builder.setTimeoutAfter(TimeUnit.SECONDS.toMillis(it))
             }
+        } else {
+            builder.setDeleteIntent(buildDismissPendingIntent(context, payload))
         }
 
         val notification = builder.build()

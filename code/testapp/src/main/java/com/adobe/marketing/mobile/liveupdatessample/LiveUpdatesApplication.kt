@@ -37,7 +37,6 @@ class LiveUpdatesApplication : Application() {
 
     // Fill in with your own Assurance session URL (from Assurance > Create Session) to
     // debug this sample app with Assurance.
-    private val ASSURANCE_SESSION_URL = ""
 
     private val STAGING = true
 
@@ -80,12 +79,12 @@ class LiveUpdatesApplication : Application() {
             Identity.updateIdentities(identityMap)
         }
         MobileCore.addPlugins(LiveUpdatePlugin(SampleLiveUpdateStyleProvider(applicationContext)))
-        // Assurance.startSession(ASSURANCE_SESSION_URL)
+        if(ASSURANCE_SESSION_URL.isNotEmpty())
+            Assurance.startSession(ASSURANCE_SESSION_URL)
         val dismissedStore = DismissedLiveUpdateStore(applicationContext)
         LiveUpdates.setLiveUpdateInterceptor(
             SampleLiveUpdateInterceptor(applicationContext, dismissedStore)
         )
-        MobileCore.trackAction("Init", null)
 
         // Optional: react to Live Update lifecycle events from the app side. The generic
         // onLiveUpdateReceived fires for every push; onStart / onUpdate / onEnd fire next
@@ -113,6 +112,7 @@ class LiveUpdatesApplication : Application() {
                             // Pass the full payload so the subscribe event correlates to the
                             // originating campaign / journey via the push's _xdm.
                             LiveUpdates.trackTopicSubscribed(topic, payload)
+                            LiveUpdates.trackTopicSubscribed(payload)
                             Log.d(TAG, "Subscribed to topic '$topic' (triggered by Live Update start).")
                         } else {
                             Log.w(TAG, "subscribeToTopic($topic) failed: ${task.exception?.localizedMessage}")
@@ -144,6 +144,20 @@ class LiveUpdatesApplication : Application() {
                 }
                 unsubscribeFromTopic(payload)
             }
+
+            override fun onClick(payload: LiveUpdatePayload) {
+                // Opening the app / choosing the destination on a chip tap is the APP's
+                // responsibility - the SDK only fires applicationOpened tracking and this
+                // callback, it does not open the app or resolve any deep link. Here the sample
+                // simply brings its own MainActivity to the foreground. A real app can route to a
+                // specific screen using fields from the payload (notificationId, topicName, or
+                // custom keys in contentState).
+                Log.d(TAG, "Live Update CLICK: id=${payload.notificationId}; opening the app")
+                val intent = Intent(applicationContext, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                }
+                startActivity(intent)
+            }
         })
     }
 
@@ -155,6 +169,7 @@ class LiveUpdatesApplication : Application() {
                     // Pass the full payload so the unsubscribe event correlates to the
                     // originating campaign / journey via the push's _xdm.
                     LiveUpdates.trackTopicUnsubscribed(topic, payload)
+                    LiveUpdates.trackTopicUnsubscribed(payload)
                     Log.d(TAG, "Unsubscribed from topic '$topic' (triggered by Live Update end).")
                 } else {
                     Log.w(TAG, "unsubscribeFromTopic($topic) failed: ${task.exception?.localizedMessage}")

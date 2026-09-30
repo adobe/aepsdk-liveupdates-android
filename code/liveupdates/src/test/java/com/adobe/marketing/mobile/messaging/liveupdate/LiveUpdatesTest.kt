@@ -343,72 +343,6 @@ class LiveUpdatesTest {
     }
 
     // =====================================================================
-    // Topic subscription tracking
-    // =====================================================================
-
-    @Test
-    fun `trackTopicSubscribed lightweight overload dispatches topic_subscribed`() {
-        LiveUpdates.trackTopicSubscribed("topicA")
-        val xdm = xdmMap(captureEvent())
-        assertEquals("liveUpdateTracking.topic", xdm["eventType"])
-        val la = liveActivity(xdm)
-        assertEquals("topic_subscribed", la["event"])
-        assertEquals("topicA", la["channelID"])
-        assertFalse(la.containsKey("liveActivityID"))
-    }
-
-    @Test
-    fun `trackTopicSubscribed with notificationId includes liveActivityID`() {
-        LiveUpdates.trackTopicSubscribed("topicA", "notif1")
-        val la = liveActivity(xdmMap(captureEvent()))
-        assertEquals("notif1", la["liveActivityID"])
-    }
-
-    @Test
-    fun `trackTopicSubscribed payload overload threads payload xdm and notificationId`() {
-        val xdm = JSONObject().put("campaignID", "camp9")
-        val p = payload(eventType = LiveUpdatePayload.EVENT_TYPE_START, xdm = xdm, notificationId = "notifX")
-
-        LiveUpdates.trackTopicSubscribed("topicA", p)
-
-        val xdmMap = xdmMap(captureEvent())
-        assertEquals("camp9", xdmMap["campaignID"])
-        assertEquals("notifX", liveActivity(xdmMap)["liveActivityID"])
-        assertEquals("topic_subscribed", liveActivity(xdmMap)["event"])
-    }
-
-    @Test
-    fun `trackTopicUnsubscribed lightweight overload dispatches topic_unsubscribed`() {
-        LiveUpdates.trackTopicUnsubscribed("topicB")
-        assertEquals("topic_unsubscribed", liveActivity(xdmMap(captureEvent()))["event"])
-    }
-
-    @Test
-    fun `trackTopicUnsubscribed with notificationId includes liveActivityID`() {
-        LiveUpdates.trackTopicUnsubscribed("topicB", "notif2")
-        assertEquals("notif2", liveActivity(xdmMap(captureEvent()))["liveActivityID"])
-    }
-
-    @Test
-    fun `trackTopicUnsubscribed payload overload threads payload xdm and notificationId`() {
-        val xdm = JSONObject().put("campaignID", "camp7")
-        val p = payload(eventType = LiveUpdatePayload.EVENT_TYPE_END, xdm = xdm, notificationId = "notifY")
-
-        LiveUpdates.trackTopicUnsubscribed("topicB", p)
-
-        val xdmMap = xdmMap(captureEvent())
-        assertEquals("camp7", xdmMap["campaignID"])
-        assertEquals("notifY", liveActivity(xdmMap)["liveActivityID"])
-        assertEquals("topic_unsubscribed", liveActivity(xdmMap)["event"])
-    }
-
-    @Test
-    fun `dispatchTopicTracking skips dispatch when topic is empty`() {
-        LiveUpdates.trackTopicSubscribed("")
-        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
-    }
-
-    // =====================================================================
     // XDM shape / dataset override / mixin flattening
     // =====================================================================
 
@@ -432,12 +366,14 @@ class LiveUpdatesTest {
     }
 
     @Test
-    fun `dispatchLiveUpdateEventTracking maps localstart to liveupdate_start`() {
+    fun `dispatchLiveUpdateEventTracking does NOT dispatch tracking for a local start`() {
+        // A locally-triggered start has no backend _xdm, so no receive tracking event is
+        // dispatched; the start is registered for a later catch-up instead (DB fails open here).
         LiveUpdates.dispatchLiveUpdateEventTracking(
             mock(Context::class.java),
             payload(eventType = LiveUpdatePayload.EVENT_TYPE_LOCAL_START)
         )
-        assertEquals("liveupdate_start", liveActivity(xdmMap(captureEvent()))["event"])
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
     }
 
     @Test
@@ -480,7 +416,7 @@ class LiveUpdatesTest {
         val messageProfile = cjm(xdm)["messageProfile"] as Map<String, Any?>
         @Suppress("UNCHECKED_CAST")
         val channel = messageProfile["channel"] as Map<String, Any?>
-        assertEquals("https://ns.adobe.com/xdm/channels/push", channel["_id"])
+        assertEquals("https://ns.adobe.com/xdm/channels/liveactivity", channel["_id"])
     }
 
     @Test

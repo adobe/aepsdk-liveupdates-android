@@ -83,6 +83,50 @@ internal object NotificationHistoryManager {
      * @return `true` if recorded (or the DB failed open); `false` if rejected as a
      * regression/duplicate (already logged) and should be dropped by the caller.
      */
+    /**
+     * Records that [payload] was started locally (see [LiveUpdates.triggerLocalLiveUpdate]) so a
+     * later backend update/end can retroactively report the start. Keyed by (notificationId,
+     * channelId). The stored event timestamp is the current epoch **milliseconds** (the same
+     * clock/unit an Event's own timestamp uses), independent of `payload.timestamp` (epoch seconds,
+     * used by [recordAndValidate] for stale checks). Best effort: runs on the DB executor and
+     * fails open (a broken DB never blocks a Live Update from rendering).
+     */
+    fun recordLocalStart(payload: LiveUpdatePayload) {
+        val eventTimestampMillis = System.currentTimeMillis()
+        try {
+            dbExecutor.submit {
+                NotificationHistoryDatabase.getInstance()
+                    .recordLocalStart(payload.notificationId, payload.channelId, eventTimestampMillis)
+            }.get()
+        } catch (e: Exception) {
+            Log.warning(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "Failed to record local start for id=${payload.notificationId}: ${e.localizedMessage}"
+            )
+        }
+    }
+
+    /**
+     * @return the epoch-millisecond start time if [payload]'s (notificationId, channelId) was in the
+     * locally-started registry (now removed, so the localstart catch-up fires exactly once); `null`
+     * otherwise or if the DB is unavailable (fails safe: no catch-up rather than a spurious one).
+     */
+    fun consumeLocalStart(payload: LiveUpdatePayload): Long? {
+        return try {
+            dbExecutor.submit<Long?> {
+                NotificationHistoryDatabase.getInstance()
+                    .consumeLocalStart(payload.notificationId, payload.channelId)
+            }.get()
+        } catch (e: Exception) {
+            Log.warning(
+                LiveUpdatesConstants.LOG_TAG, SELF_TAG,
+                "Local-start lookup failed for id=${payload.notificationId}; skipping catch-up: " +
+                    "${e.localizedMessage}"
+            )
+            null
+        }
+    }
+
     internal fun recordTimestamp(payload: LiveUpdatePayload): Boolean {
         return try {
             dbExecutor.submit<Boolean> {
