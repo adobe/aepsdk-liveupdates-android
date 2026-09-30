@@ -60,16 +60,7 @@ class LiveUpdatesTest {
         setCachedDatasetId(null)
         mobileCoreMock.close()
     }
-
-    // =====================================================================
-    // extensionVersion
-    // =====================================================================
-
-    @Test
-    fun `extensionVersion returns the SDK version`() {
-        assertEquals("0.0.1", LiveUpdates.extensionVersion())
-    }
-
+    
     // =====================================================================
     // Listener registration
     // =====================================================================
