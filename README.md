@@ -1,4 +1,4 @@
-# Adobe Experience Platform - Live Updates extension for Android
+# [DRAFT] Adobe Experience Platform - Live Updates extension for Android 
 
 ## About this project
 
