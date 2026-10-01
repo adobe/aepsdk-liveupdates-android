@@ -65,7 +65,7 @@ make lint             # run Spotless and Checkstyle checks
 ```
 
 ## Documentation
-Additional documentation, including the [architecture overview](Documentation/architecture.md), can be found under the [Documentation](Documentation) directory.
+Additional documentation for configuration and SDK usage can be found under the [Documentation](Documentation/README.md) directory.
 
 ## Related Projects
 
