@@ -1,9 +1,9 @@
 # Tracking and diagnostic events
 
-The Live Updates extension dispatches two kinds of events:
+The Live Updates plugin dispatches two kinds of events:
 
 - **Tracking events** are Edge requests. They are sent to Adobe Experience Platform for AJO reporting.
-- **Diagnostic events** stay on the SDK's Event Hub and are never sent to the Edge Network. They explain why a Live Update was dropped or was not promoted, and you can inspect them with [Adobe Experience Platform Assurance](https://experienceleague.adobe.com/docs/experience-platform/assurance/home.html).
+- **Diagnostic events** stay on the Mobile Core Event Hub and are never sent to the Edge Network. They explain why a Live Update was dropped or was not promoted, and you can inspect them with [Adobe Experience Platform Assurance](https://experienceleague.adobe.com/docs/experience-platform/assurance/home.html).
 
 ## Tracking events
 
@@ -113,7 +113,7 @@ If configuration has a `messaging.eventDataset` value, it is added as `meta.coll
 
 ## Diagnostic events
 
-The Live Updates extension dispatches diagnostic events with the same XDM structure as tracking events, but without the dataset `meta`. The category is in `xdm.eventType`, and the subcategory is in `pushChannelContext.liveActivity.event`.
+The Live Updates plugin dispatches diagnostic events with the same XDM structure as tracking events, but without the dataset `meta`. The category is in `xdm.eventType`, and the subcategory is in `pushChannelContext.liveActivity.event`.
 
 | Event property | Render error | Incompatible |
 | -------------- | ------------ | ------------ |

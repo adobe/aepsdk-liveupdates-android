@@ -3,6 +3,7 @@
 ### Installation
 
 - [Getting started](./sources/getting-started.md)
+- [Live Updates is a plugin, not an extension](./sources/getting-started.md#a-plugin-not-an-extension)
 - [Test app setup](./sources/testapp-setup.md)
 
 ### Live Updates

@@ -1,4 +1,4 @@
-# Architecture - Live Updates SDK
+# Architecture - Live Updates plugin
 
 The design document for `aepsdk-liveupdates-android`. For integration instructions, see the [developer documentation](./README.md).
 
@@ -11,14 +11,14 @@ The design document for `aepsdk-liveupdates-android`. For integration instructio
 | **Live Updates are opt-in and additive.** Core and Messaging stay on their existing toolchain (commons 3.x, compileSdk 34). | The Live Update APIs (`ProgressStyle`, `setRequestPromotedOngoing`, `setShortCriticalText`) require `androidx.core` 1.17 / compileSdk 36 / AGP 8.9.1. Forcing that on every AEP consumer would propagate a major toolchain bump across the whole SDK family. | Live Updates ship in their own AAR, built with commons 4.0.0 (compileSdk 36). Only apps that add this AAR need compileSdk 36. |
 | **One-directional AAR compatibility.** | AAR metadata checks are one-way: an app at compileSdk 36 can use AARs built at 34, but an app at 34 cannot use an AAR built at 36. | The app and the Live Updates AAR use compileSdk 36. The Core and Messaging AARs stay at 34. At runtime, `androidx.core` resolves to 1.17.0, so `NotificationCompat.Builder` is the same class for every SDK. |
 | **No compile-time dependency between Messaging and Live Updates.** | Messaging must not depend on a compileSdk 36 AAR, and Live Updates should not be tied to Messaging internals. | Both depend on Core's plugin contract (`ILiveupdatePlugin`). The app registers `LiveUpdatePlugin` with `MobileCore.addPlugins`, and Messaging looks it up with `MobileCore.getPlugin`. The push is passed as `Any`, so Core does not depend on Firebase. |
-| **The app owns styling; the SDK owns everything else.** | Styling depends on the use case: a flight, a delivery, and a sports score look different. The notification id, channel, ongoing and promotion flags, intents, and tracking work the same for every use case. | The app implements `ILiveUpdateStyleProvider.provideStyle(payload): NotificationCompat.Style?`. The SDK does everything else. |
-| **The SDK does not depend on specific notification styles,** so it keeps working with API 37+ styles such as `MetricStyle`. | Building in knowledge of specific styles would exclude future Android notification styles. | The provider returns the base type `NotificationCompat.Style?`. The SDK never casts, inspects, or validates it. |
+| **The app owns styling; the plugin owns everything else.** | Styling depends on the use case: a flight, a delivery, and a sports score look different. The notification id, channel, ongoing and promotion flags, intents, and tracking work the same for every use case. | The app implements `ILiveUpdateStyleProvider.provideStyle(payload): NotificationCompat.Style?`. The plugin does everything else. |
+| **The plugin does not depend on specific notification styles,** so it keeps working with API 37+ styles such as `MetricStyle`. | Building in knowledge of specific styles would exclude future Android notification styles. | The provider returns the base type `NotificationCompat.Style?`. The plugin never casts, inspects, or validates it. |
 | **A small public API.** | Every public symbol has to be maintained indefinitely. | Required wiring is one line: `MobileCore.addPlugins(LiveUpdatePlugin(MyStyleProvider()))`. The listener and interceptor are optional. |
 | **Timing that does not depend on the device clock.** | Device clocks drift, especially on emulators. Absolute dismissal times delayed dismissals by about 60 seconds in testing. | Dismissal uses `dismiss_after`, a duration relative to when the end push arrives. `timestamp` is compared only with earlier timestamps from the server for ordering, plus a coarse 28-day staleness check. |
 | **Ordered, idempotent processing.** | FCM can deliver pushes late, more than once, or out of order. | Each accepted `timestamp` is stored per (`notification_id`, `notification_channel_id`). A push with an older or equal timestamp is dropped. |
-| **Degrade without failing** when the system won't promote the notification. | Not every device, channel, or style can produce a chip, and that should never cause a crash or a dropped push. | The SDK still posts the notification as a regular ongoing notification, logs the reason, and dispatches an `incompatible` diagnostic event. |
+| **Degrade without failing** when the system won't promote the notification. | Not every device, channel, or style can produce a chip, and that should never cause a crash or a dropped push. | The plugin still posts the notification as a regular ongoing notification, logs the reason, and dispatches an `incompatible` diagnostic event. |
 | **Tracking parity with iOS Live Activities.** | AJO reporting should work without new schema work. | Tracking uses the AJO push tracking XDM, with channel `https://ns.adobe.com/xdm/channels/liveactivity` and `pushChannelContext.liveActivity`. |
-| **Not a `MobileCore` extension.** | The SDK only needs to send events. It does not need extension lifecycle or shared state. | The SDK is a plain library. It dispatches events with `MobileCore.dispatchEvent`, and its only Event Hub listener caches `messaging.eventDataset` from configuration. |
+| **A plugin, not a `MobileCore` extension.** | Live Updates only needs to render the pushes Messaging hands to it and to send events. It does not need extension registration, the extension lifecycle, or shared state. | The app registers it with `MobileCore.addPlugins`, and Messaging finds it with `MobileCore.getPlugin`. It dispatches events with `MobileCore.dispatchEvent`, and its only Event Hub listener caches `messaging.eventDataset` from configuration. |
 
 ---
 
@@ -28,13 +28,13 @@ The design document for `aepsdk-liveupdates-android`. For integration instructio
 flowchart TB
     App["<b>Customer App</b><br/>compileSdk 36"]
 
-    LU["<b>Live Updates SDK</b><br/>aepsdk-liveupdates-android<br/>compileSdk 36, commons 4.0.0<br/>package: com.adobe.marketing.mobile.messaging.liveupdate"]
+    LU["<b>Live Updates plugin</b><br/>aepsdk-liveupdates-android<br/>compileSdk 36, commons 4.0.0<br/>package: com.adobe.marketing.mobile.messaging.liveupdate"]
 
-    Msg["<b>Messaging SDK</b><br/>aepsdk-messaging-android<br/>compileSdk 34, commons 3.x"]
+    Msg["<b>Messaging extension</b><br/>aepsdk-messaging-android<br/>compileSdk 34, commons 3.x"]
 
-    Edge["<b>Edge / Edge Identity</b><br/>compileSdk 34"]
+    Edge["<b>Edge Network / Edge Identity extensions</b><br/>compileSdk 34"]
 
-    Core["<b>Core SDK</b><br/>aepsdk-core-android<br/>compileSdk 34, commons 3.x<br/>ILiveupdatePlugin + plugin registry"]
+    Core["<b>Mobile Core</b><br/>aepsdk-core-android<br/>compileSdk 34, commons 3.x<br/>ILiveupdatePlugin + plugin registry"]
 
     App -->|depends on| LU
     App -->|depends on| Msg
@@ -54,11 +54,20 @@ flowchart TB
 
 - **Live Updates** depends on Core and Edge (`implementation`), `androidx.core:core-ktx` 1.17.0, and `firebase-messaging` (`compileOnly`, so the app provides it).
 - **Live Updates and Messaging do not depend on each other at compile time.** They connect at runtime through Core's plugin registry. `LiveUpdatesConstants.LIVE_UPDATE_DATA_KEY` intentionally duplicates Messaging's `adb_liveupdate_data` key so that no compile-time dependency is needed.
-- **Key rule:** Core and Messaging must never depend on the Live Updates SDK. That would force them onto commons 4.0.0 and pass the toolchain bump on to every AEP consumer.
+- **Key rule:** Core and Messaging must never depend on the Live Updates plugin. That would force them onto commons 4.0.0 and pass the toolchain bump on to every AEP consumer.
 
 ---
 
 ## 3. Plugin contract
+
+Live Updates is a Mobile SDK plugin rather than an extension:
+
+| | Extension | Plugin |
+|---|---|---|
+| Examples | Messaging, Edge Network, Edge Identity, Lifecycle, Assurance | Live Updates |
+| Registration | `MobileCore.registerExtensions` | `MobileCore.addPlugins` |
+| Contract | Extends `com.adobe.marketing.mobile.Extension` | Implements an `IAepPlugin` sub-interface, here `ILiveupdatePlugin` |
+| Runtime | Registered with the Event Hub. Receives events through listeners and can share state. | Kept in Core's plugin registry. Looked up by type with `MobileCore.getPlugin` and called directly by the extension that uses it, here Messaging. |
 
 Core 3.10.0 provides the following:
 
@@ -97,8 +106,8 @@ Messaging never reads inside `adb_liveupdate_data`.
 | `ILiveUpdateStyleProvider` | Public | The app's styling hook. Required. |
 | `ILiveUpdateListener` | Public | App callbacks: `onLiveUpdateReceived`, `onStart`, `onUpdate`, `onEnd`, `onClick`, `onDismissed`. Optional. |
 | `ILiveUpdateInterceptor` | Public | Lets the app drop a Live Update before it is rendered. Optional. |
-| `LiveUpdateTrackerActivity` | Declared in the SDK manifest | A transparent activity that is the chip's content intent. Dispatches `applicationOpened` tracking, calls `onClick`, and finishes immediately. |
-| `LiveUpdateInteractionReceiver` | Declared in the SDK manifest | The chip's delete intent. Dispatches `customAction`/`Dismiss` tracking and calls `onDismissed`. |
+| `LiveUpdateTrackerActivity` | Declared in the plugin's manifest | A transparent activity that is the chip's content intent. Dispatches `applicationOpened` tracking, calls `onClick`, and finishes immediately. |
+| `LiveUpdateInteractionReceiver` | Declared in the plugin's manifest | The chip's delete intent. Dispatches `customAction`/`Dismiss` tracking and calls `onDismissed`. |
 | `NotificationHistoryManager` | Internal | Validates timestamps, keeps the local-start registry, and evicts expired rows. Runs database work on a single background thread. |
 | `NotificationHistoryDatabase` | Internal | SQLite storage, using Core's `SQLiteDatabaseHelper`. |
 | `LiveUpdateListenerStore` | Internal | Holds the listener in a volatile field. |
@@ -115,9 +124,9 @@ sequenceDiagram
     autonumber
     participant App as App
     participant FCM as Firebase Cloud Messaging
-    participant Msg as Messaging SDK<br/>(MessagingService)
+    participant Msg as Messaging extension<br/>(MessagingService)
     participant Core as Core<br/>(plugin registry)
-    participant LU as Live Updates SDK<br/>(LiveUpdatePlugin)
+    participant LU as Live Updates plugin<br/>(LiveUpdatePlugin)
     participant OS as Android<br/>NotificationManager
     participant Hub as Event Hub / Edge
 
@@ -185,7 +194,7 @@ sequenceDiagram
     Receiver->>App: onDismissed(rebuilt payload)
 ```
 
-The SDK never opens an app screen. Choosing what to open is the app's responsibility in `onClick`.
+The plugin never opens an app screen. Choosing what to open is the app's responsibility in `onClick`.
 
 ### Integration patterns
 
@@ -204,7 +213,7 @@ The FCM data contains `adb_liveupdate_data`, the JSON envelope, and `_xdm`, the 
 
 The full key reference and examples are in the [payload reference](./sources/payload.md).
 
-The envelope root holds fields the SDK uses. `content_state` holds app-defined state that only the style provider reads. Use-case details, such as whether a Live Update is a flight or a delivery, stay inside `content_state`.
+The envelope root holds fields the plugin uses. `content_state` holds app-defined state that only the style provider reads. Use-case details, such as whether a Live Update is a flight or a delivery, stay inside `content_state`.
 
 ---
 
@@ -248,7 +257,7 @@ The full event reference is in [Tracking and diagnostic events](./sources/tracki
 
 `NotificationManager.notify(id, ...)` has no memory of ended notifications. A later push with the same `notification_id` and a newer `timestamp` posts a new notification. **This differs from iOS Live Activities**, which ignore updates to an ended activity.
 
-The SDK only rejects pushes that are out of order or duplicates, based on the timestamp history. Any further gating is left to the app, through `ILiveUpdateInterceptor`. The test app shows this pattern with `DismissedLiveUpdateStore`. Apps usually already track their own domain lifecycle, so the SDK does not keep a separate "ended" set.
+The plugin only rejects pushes that are out of order or duplicates, based on the timestamp history. Any further gating is left to the app, through `ILiveUpdateInterceptor`. The test app shows this pattern with `DismissedLiveUpdateStore`. Apps usually already track their own domain lifecycle, so the plugin does not keep a separate "ended" set.
 
 ### Why `dismiss_after` is relative rather than an absolute dismissal time
 
@@ -262,11 +271,11 @@ An earlier diagnosis that it was ignored was wrong. The delay was caused by the 
 
 The checks run in this order: API 36 or newer, `Notification.hasPromotableCharacteristics()`, `NotificationManager` available, channel exists, channel importance at least `IMPORTANCE_HIGH`, and `canPostPromotedNotifications()`. The first failed check is logged and reported as an `incompatible` event, and the notification still posts.
 
-The SDK creates a missing channel with `IMPORTANCE_HIGH`, but never changes a channel the app already created.
+The plugin creates a missing channel with `IMPORTANCE_HIGH`, but never changes a channel the app already created.
 
 ### End notifications have no delete intent
 
-For `end` pushes the SDK sets `setTimeoutAfter`, when a `dismiss_after` value is present, and does not set a delete intent. As a result, once a Live Update has ended, swiping it away does not dispatch a dismiss event or call `onDismissed`.
+For `end` pushes the plugin sets `setTimeoutAfter`, when a `dismiss_after` value is present, and does not set a delete intent. As a result, once a Live Update has ended, swiping it away does not dispatch a dismiss event or call `onDismissed`.
 
 ### Process death
 
@@ -300,7 +309,7 @@ Only lifecycle and topic events set `liveActivity.event`. A tap or dismissal dur
 
 - Wear OS, Android Auto, and TV rendering.
 - Styles beyond what `NotificationCompat.Style` and the platform styles support.
-- Validating `content_state`. The SDK passes it to the style provider unchanged.
+- Validating `content_state`. The plugin passes it to the style provider unchanged.
 
 ---
 
@@ -312,8 +321,8 @@ Only lifecycle and topic events set `liveActivity.event`. A tap or dismissal dur
 | `MobileCore.addPlugins` / `getPlugin` | aepsdk-core-android | `code/core/src/phone/java/com/adobe/marketing/mobile/MobileCore.java` |
 | `MessagingService.handleRemoteMessage` (Live Update branch) | aepsdk-messaging-android | `code/messaging/src/main/java/com/adobe/marketing/mobile/messaging/MessagingService.java` |
 | `MessagingConstants.Push.PayloadKeys.LIVE_UPDATE_DATA` | aepsdk-messaging-android | `code/messaging/src/main/java/com/adobe/marketing/mobile/messaging/MessagingConstants.java` |
-| All Live Updates SDK classes | aepsdk-liveupdates-android | `code/liveupdates/src/main/java/com/adobe/marketing/mobile/messaging/liveupdate/` |
-| SDK manifest (permissions, tracker activity, dismiss receiver) | aepsdk-liveupdates-android | `code/liveupdates/src/main/AndroidManifest.xml` |
+| All Live Updates plugin classes | aepsdk-liveupdates-android | `code/liveupdates/src/main/java/com/adobe/marketing/mobile/messaging/liveupdate/` |
+| Plugin manifest (permissions, tracker activity, dismiss receiver) | aepsdk-liveupdates-android | `code/liveupdates/src/main/AndroidManifest.xml` |
 | Unit tests | aepsdk-liveupdates-android | `code/liveupdates/src/test/java/com/adobe/marketing/mobile/messaging/liveupdate/` |
 | Test app | aepsdk-liveupdates-android | `code/testapp/` |
 

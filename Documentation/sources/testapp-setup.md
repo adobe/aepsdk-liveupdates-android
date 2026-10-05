@@ -1,6 +1,6 @@
 # Test app setup
 
-The test app is in `code/testapp` (application id `com.adobe.marketing.mobile.liveupdatessample`). It uses the `:liveupdates` module from source, along with the published Core, Messaging, Edge, Edge Identity, Lifecycle, and Assurance extensions.
+The test app is in `code/testapp` (application id `com.adobe.marketing.mobile.liveupdatessample`). It builds the Live Updates plugin from the `:liveupdates` module source, and uses the published Mobile Core library and the Messaging, Edge Network, Edge Identity, Lifecycle, and Assurance extensions.
 
 ## Configure the app
 
@@ -30,6 +30,7 @@ The main screen provides:
 
 ## What the app demonstrates
 
+- **Registration**: `LiveUpdatesApplication` registers the Messaging, Edge Identity, Lifecycle, Edge Network, and Assurance extensions with `MobileCore.registerExtensions`, and registers the Live Updates plugin separately with `MobileCore.addPlugins(LiveUpdatePlugin(...))`.
 - **Mixed handling**: `SamplePushService` is registered in the manifest and passes messages to `MessagingService.handleRemoteMessage`. Set `FULL_MANUAL_MODE` to `true` to try [manual handling](./integration-patterns.md#manual-handling). To try automatic handling, replace the service in `AndroidManifest.xml` with `com.adobe.marketing.mobile.messaging.MessagingService`.
 - **Style provider**: `SampleLiveUpdateStyleProvider` chooses a style from `content_state.custom_key_template_type`:
 
@@ -65,7 +66,7 @@ Use the message format in the [payload reference](./payload.md#fcm-message-examp
 From the repository root:
 
 ```bash
-make assemble-phone        # build the Live Updates SDK
+make assemble-phone        # build the Live Updates plugin
 make assemble-app          # build the test app
 make unit-test             # run unit tests
 make unit-test-coverage    # run unit tests with a coverage report

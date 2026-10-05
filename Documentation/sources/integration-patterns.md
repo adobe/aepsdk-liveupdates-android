@@ -1,6 +1,6 @@
 # Automatic, mixed, and manual handling of Live Updates
 
-There are three ways to connect Live Update pushes to the SDK. In the first two, the SDK posts the notification. In the third, your app posts it.
+There are three ways to connect Live Update pushes to the Live Updates plugin. In the first two, the plugin posts the notification. In the third, your app posts it.
 
 | | Automatic | Mixed | Manual |
 | --- | --------- | ----- | ------ |
@@ -15,7 +15,7 @@ There are three ways to connect Live Update pushes to the SDK. In the first two,
 
 ## Automatic handling
 
-Register the plugin as shown in [Getting started](./getting-started.md#register-the-extensions-and-the-live-update-plugin), and declare the Messaging extension's service in your `AndroidManifest.xml`:
+Register the plugin as shown in [Getting started](./getting-started.md#register-the-extensions-and-the-live-updates-plugin), and declare the Messaging extension's service in your `AndroidManifest.xml`:
 
 ```xml
 <service
@@ -51,7 +51,7 @@ class MyPushService : FirebaseMessagingService() {
 
 ## Manual handling
 
-Use manual handling when your app needs full control of the notification. Your app parses the payload, builds and posts the notification, and calls the SDK only for tracking. `LiveUpdatePlugin` is not involved, so the interceptor, timestamp validation, promotion checks, and diagnostic events do not apply.
+Use manual handling when your app needs full control of the notification. Your app parses the payload, builds and posts the notification, and uses the plugin's `LiveUpdates` APIs only for tracking. `LiveUpdatePlugin` is not involved, so the interceptor, timestamp validation, promotion checks, and diagnostic events do not apply.
 
 ```kotlin
 class MyPushService : FirebaseMessagingService() {
@@ -126,13 +126,13 @@ LiveUpdates.triggerLocalLiveUpdate(context, payload)
 
 The local Live Update is rendered like a pushed one, and the listener's `onLiveUpdateReceived` and `onStart` are called. Because it has no `_xdm`, no tracking event is dispatched at that point.
 
-Instead, the SDK stores the `notification_id` and `notification_channel_id`. When the first backend push with the same ids and an `_xdm` arrives, the SDK dispatches a `liveupdate_localstart` event, timestamped with when the local start happened, before that push's own tracking event. This links the local start to the campaign. The catch-up is dispatched only once.
+Instead, the plugin stores the `notification_id` and `notification_channel_id`. When the first backend push with the same ids and an `_xdm` arrives, the plugin dispatches a `liveupdate_localstart` event, timestamped with when the local start happened, before that push's own tracking event. This links the local start to the campaign. The catch-up is dispatched only once.
 
 The backend push is still validated, so its `timestamp` must be newer than the `timestamp` of the local payload.
 
 ## Topic subscriptions
 
-Broadcast Live Updates, such as a sports score sent to many devices, are delivered through FCM topics. The SDK does not manage topic subscriptions. Your app subscribes through Firebase, typically from a listener callback, and reports the change with `trackTopicSubscribed` or `trackTopicUnsubscribed`:
+Broadcast Live Updates, such as a sports score sent to many devices, are delivered through FCM topics. The plugin does not manage topic subscriptions. Your app subscribes through Firebase, typically from a listener callback, and reports the change with `trackTopicSubscribed` or `trackTopicUnsubscribed`:
 
 ```kotlin
 LiveUpdates.setLiveUpdateListener(object : ILiveUpdateListener {
@@ -154,9 +154,9 @@ LiveUpdates.setLiveUpdateListener(object : ILiveUpdateListener {
 
 ## Handling taps and dismissals
 
-With automatic or mixed handling, the SDK handles chip interactions:
+With automatic or mixed handling, the plugin handles chip interactions:
 
-- **Tap**: The SDK's `LiveUpdateTrackerActivity` dispatches a `liveUpdateTracking.applicationOpened` event and calls `ILiveUpdateListener.onClick`. The SDK does not open the app or any deep link. Open the screen you want from `onClick`:
+- **Tap**: The plugin's `LiveUpdateTrackerActivity` dispatches a `liveUpdateTracking.applicationOpened` event and calls `ILiveUpdateListener.onClick`. The plugin does not open the app or any deep link. Open the screen you want from `onClick`:
 
   ```kotlin
   override fun onClick(payload: LiveUpdatePayload) {

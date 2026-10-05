@@ -33,7 +33,7 @@ FCM merges `message.data` and `message.android.data` into `RemoteMessage.getData
 | Key | Required | Type | Description |
 | --- | -------- | ---- | ----------- |
 | `notification_id` | Yes | String | Identifies the Live Update. Every push with the same id updates the same notification. |
-| `notification_channel_id` | Yes | String | The Android notification channel. The SDK creates the channel with `IMPORTANCE_HIGH` if it does not exist. |
+| `notification_channel_id` | Yes | String | The Android notification channel. The plugin creates the channel with `IMPORTANCE_HIGH` if it does not exist. |
 | `event_type` | Yes | String | `start`, `update`, or `end`. Local Live Updates use `localstart`. Any other value is dropped. |
 | `timestamp` | Yes | Number | When the state was produced, in epoch **seconds**. See [Validation](#validation). |
 | `title` | No | String | The notification title. Required for the notification to be promoted to a chip. |
@@ -42,7 +42,7 @@ FCM merges `message.data` and `message.android.data` into `RemoteMessage.getData
 | `critical_text` | No | String | Short text shown in the status-bar chip. |
 | `when` | No | Number | A time to display on the notification, in epoch **seconds**. An invalid value is ignored. |
 | `dismiss_after` | No | Number | Only applies when `event_type` is `end`. The number of seconds after the end push arrives before the notification is removed. |
-| `content_state` | No | Object | App-defined state for the style provider, such as a template type or progress. The SDK does not interpret it. |
+| `content_state` | No | Object | App-defined state for the style provider, such as a template type or progress. The plugin does not interpret it. |
 | `topic_name` | No | String | The FCM topic this Live Update is broadcast on. Reported in tracking events and used by `trackTopicSubscribed` and `trackTopicUnsubscribed`. |
 | `small_icon` | No | String | The name of a drawable resource in your app to use as the small icon, for example `ic_flight_notification`. |
 
@@ -144,5 +144,5 @@ Accepted timestamps are stored in a local SQLite database and kept for 28 days. 
 | `setShortCriticalText` | `critical_text` |
 | `setWhen` and `setShowWhen(true)` | `when` |
 | `setTimeoutAfter` | `dismiss_after`, only for `end` pushes with a value greater than 0 |
-| `setContentIntent` | The SDK's tap tracking activity |
-| `setDeleteIntent` | The SDK's dismiss receiver. Not set for `end` pushes. |
+| `setContentIntent` | The plugin's tap tracking activity |
+| `setDeleteIntent` | The plugin's dismiss receiver. Not set for `end` pushes. |

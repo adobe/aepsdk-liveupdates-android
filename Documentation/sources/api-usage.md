@@ -1,6 +1,6 @@
 # API usage
 
-All public classes are in the `com.adobe.marketing.mobile.messaging.liveupdate` package.
+All public classes of the Live Updates plugin are in the `com.adobe.marketing.mobile.messaging.liveupdate` package.
 
 - [LiveUpdatePlugin](#liveupdateplugin)
 - [LiveUpdates](#liveupdates)
@@ -21,7 +21,7 @@ All public classes are in the `com.adobe.marketing.mobile.messaging.liveupdate` 
 
 ## LiveUpdatePlugin
 
-The SDK's implementation of Core's `com.adobe.marketing.mobile.plugin.ILiveupdatePlugin` contract. When registered with `MobileCore.addPlugins`, the Messaging extension hands every Live Update push to it. The plugin parses the push, asks your style provider for a style, posts the notification, dispatches tracking, and calls your listener.
+The class you register with `MobileCore.addPlugins`. It implements Mobile Core's `com.adobe.marketing.mobile.plugin.ILiveupdatePlugin` contract, and the Messaging extension hands every Live Update push to it. The plugin parses the push, asks your style provider for a style, posts the notification, dispatches tracking, and calls your listener.
 
 #### Syntax
 
@@ -59,7 +59,7 @@ The public entry point for listener registration, local Live Updates, and manual
 
 ### extensionVersion
 
-Returns the version of the Live Updates extension.
+Returns the version of the Live Updates plugin. The method keeps the `extensionVersion` name used by the other Adobe Experience Platform Mobile SDK libraries.
 
 #### Syntax
 
@@ -198,7 +198,7 @@ val tapIntent = Intent(context, MainActivity::class.java).apply {
 
 ### handleNotificationResponse
 
-Dispatches an interaction tracking event (a tap, an action, or a dismissal) for an intent prepared with [`addPushTrackingDetails`](#addpushtrackingdetails). The SDK's own tap activity and dismiss receiver call it automatically. Call it yourself only when you handle interactions in manual mode.
+Dispatches an interaction tracking event (a tap, an action, or a dismissal) for an intent prepared with [`addPushTrackingDetails`](#addpushtrackingdetails). The plugin's own tap activity and dismiss receiver call it automatically. Call it yourself only when you handle interactions in manual mode.
 
 | Interaction | `applicationOpened` | `customActionId` |
 | ----------- | ------------------- | ---------------- |
@@ -237,7 +237,7 @@ override fun onCreate(savedInstanceState: Bundle?) {
 
 Dispatches a topic tracking event after your app has subscribed the device to, or unsubscribed it from, an FCM topic. The topic is taken from the payload's `topic_name`. The event is linked to the originating campaign through the payload's `_xdm`.
 
-The SDK does not subscribe or unsubscribe the device itself. Call `FirebaseMessaging.subscribeToTopic` or `unsubscribeFromTopic` first, then call these methods when the Firebase task succeeds. No event is dispatched if the payload has no `topic_name` or no `_xdm`.
+The plugin does not subscribe or unsubscribe the device itself. Call `FirebaseMessaging.subscribeToTopic` or `unsubscribeFromTopic` first, then call these methods when the Firebase task succeeds. No event is dispatched if the payload has no `topic_name` or no `_xdm`.
 
 #### Syntax
 
@@ -261,7 +261,7 @@ override fun onStart(payload: LiveUpdatePayload) {
 
 ## ILiveUpdateStyleProvider
 
-The interface your app implements to supply the notification style for each Live Update. Return any `NotificationCompat.Style`, for example `ProgressStyle` on API 36+ or a newer style on later API levels. The SDK does not inspect the returned style.
+The interface your app implements to supply the notification style for each Live Update. Return any `NotificationCompat.Style`, for example `ProgressStyle` on API 36+ or a newer style on later API levels. The plugin does not inspect the returned style.
 
 Returning `null` posts the notification without a style and dispatches a `style_null` diagnostic event. The provider is called on the push-processing thread.
 
@@ -295,16 +295,16 @@ Optional callbacks for Live Update activity. In Kotlin, every method has an empt
 | `onStart(payload)` | `event_type` is `start` or `localstart`. |
 | `onUpdate(payload)` | `event_type` is `update`. |
 | `onEnd(payload)` | `event_type` is `end`. |
-| `onClick(payload)` | The user taps the chip body. The SDK records the tap but does not open the app. Your app decides what to open. |
+| `onClick(payload)` | The user taps the chip body. The plugin records the tap but does not open the app. Your app decides what to open. |
 | `onDismissed(payload)` | The user swipes the chip away. Not called once the Live Update has ended, as explained in [Handling taps and dismissals](./integration-patterns.md#handling-taps-and-dismissals). |
 
-`onClick` and `onDismissed` may run in an app process that was started just to deliver the interaction. Their payload is rebuilt from data saved on the notification when it was last posted, so use `payload.notificationId` to look up current state in your app. The SDK catches and logs exceptions thrown from the listener. The receive callbacks run on the push-processing thread, so do not do long-running work in them.
+`onClick` and `onDismissed` may run in an app process that was started just to deliver the interaction. Their payload is rebuilt from data saved on the notification when it was last posted, so use `payload.notificationId` to look up current state in your app. The plugin catches and logs exceptions thrown from the listener. The receive callbacks run on the push-processing thread, so do not do long-running work in them.
 
 ---
 
 ## ILiveUpdateInterceptor
 
-Decides whether the SDK should process a Live Update. Return `false` to drop it entirely: no notification, tracking event, or listener callback. An `app_discarded` diagnostic event is dispatched instead. If the interceptor throws, the SDK proceeds as if it returned `true`.
+Decides whether the plugin should process a Live Update. Return `false` to drop it entirely: no notification, tracking event, or listener callback. An `app_discarded` diagnostic event is dispatched instead. If the interceptor throws, the plugin proceeds as if it returned `true`.
 
 A common use is suppressing later pushes for a Live Update the user has already dismissed.
 
