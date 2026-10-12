@@ -3,7 +3,7 @@
 The Live Updates plugin dispatches two kinds of events:
 
 - **Tracking events** are Edge requests. They are sent to Adobe Experience Platform for AJO reporting.
-- **Diagnostic events** stay on the Mobile Core Event Hub and are never sent to the Edge Network. They explain why a Live Update was dropped or was not promoted, and you can inspect them with [Adobe Experience Platform Assurance](https://experienceleague.adobe.com/docs/experience-platform/assurance/home.html).
+- **Diagnostic events** stay on the Mobile Core Event Hub and are never sent to the Edge Network. They explain why a Live Update was dropped or was not promoted, and you can inspect them with [Adobe Experience Platform Assurance](https://experienceleague.adobe.com/docs/experience-platform/assurance/home.html), or match them on the device with a Mobile Core rule. See [Live Updates troubleshooting](https://developer.adobe.com/client-sdks/edge/adobe-journey-optimizer/live-activities/android/troubleshooting) in the public documentation.
 
 ## Tracking events
 
@@ -143,8 +143,10 @@ The notification is posted as a regular ongoing notification instead of a status
 | Subcategory | Cause |
 | ----------- | ----- |
 | `device_api_below_36` | The device runs a version earlier than Android 16 (API 36). |
-| `not_promotable` | `Notification.hasPromotableCharacteristics()` returned `false`. For example, the style is not eligible for promotion or the payload has no `title`. |
+| `not_promotable` | `Notification.hasPromotableCharacteristics()` returned `false`, for example because the style is not one Android allows for Live Updates. Some styles also need a title, so this can depend on the style and the device manufacturer. |
 | `notification_manager_unavailable` | The `NotificationManager` system service is unavailable. |
 | `channel_not_registered` | The notification channel does not exist. |
 | `channel_importance_low` | The channel's importance is lower than `IMPORTANCE_HIGH`. |
 | `promotion_not_permitted` | `NotificationManager.canPostPromotedNotifications()` returned `false`, for example because the user turned off Live Updates for the app. |
+
+Promotion to a status-bar chip needs Android 16 QPR2 (API 36.1) or newer. The `device_api_below_36` check compares only the major API level, so it is not reported on a device running API 36.0. On those devices, Android decides whether to promote the notification. For the full requirements, see [Live Updates](https://developer.android.com/develop/ui/views/notifications/live-update) in the Android documentation.

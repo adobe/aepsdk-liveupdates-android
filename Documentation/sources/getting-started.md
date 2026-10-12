@@ -20,37 +20,42 @@ Do not add Live Updates to the `registerExtensions` list. The Messaging extensio
 | ----------- | ------- |
 | App `compileSdk` | 36 or newer |
 | App `minSdk` | 21 or newer |
+| `com.adobe.marketing.mobile:sdk-bom` | 3.24.0 or newer, if you use the BOM |
 | `com.adobe.marketing.mobile:core` | 3.10.0 or newer |
 | `com.adobe.marketing.mobile:edge` | 3.1.0 or newer |
 | `com.adobe.marketing.mobile:messaging` | 3.13.0 or newer |
+| `com.adobe.marketing.mobile:liveupdates` | 3.0.0 or newer |
+| `androidx.core:core-ktx` | 1.17.0 or newer. Declare it explicitly. |
 | `com.google.firebase:firebase-messaging` | Required. Provided by the app. |
+| Device, for promotion to a status-bar chip | Android 16 QPR2 (API 36.1) or newer |
 
-The plugin is compiled against API 36 and `androidx.core:core-ktx` 1.17.0, so apps with a lower `compileSdk` fail the AAR metadata check at build time.
+The plugin calls `NotificationCompat` APIs that were added in `androidx.core` 1.17.0, such as `setRequestPromotedOngoing` and `setShortCriticalText`. The plugin's published POM declares only `core` and `edge`, so your app must add `androidx.core:core-ktx` 1.17.0 or newer itself. Without it, Gradle resolves an older `androidx.core` through the other Adobe libraries (1.12.0 with `sdk-bom` 3.24.0), and the plugin fails at runtime when it posts a notification. `androidx.core` 1.17.0 requires `compileSdk` 36 or newer.
 
-Live Updates are promoted to a status-bar chip only on devices running Android 16 (API 36) or newer. On older devices, or when promotion is not possible (see [Promotion requirements](#promotion-requirements)), the notification is still posted as a regular ongoing notification.
+Live Updates are promoted to a status-bar chip only on devices running Android 16 QPR2 (API 36.1) or newer, and only when Android allows it (see [Promotion requirements](#promotion-requirements)). Otherwise, the notification is still posted as a regular ongoing notification.
 
 ## Add the dependencies
 
 Add the following to your app level gradle file's `dependencies`:
 
 ```groovy
-implementation platform('com.adobe.marketing.mobile:sdk-bom:3.+')
+implementation platform('com.adobe.marketing.mobile:sdk-bom:<bom-version>')
 implementation 'com.adobe.marketing.mobile:core'
 implementation 'com.adobe.marketing.mobile:edge'
 implementation 'com.adobe.marketing.mobile:edgeidentity'
 implementation 'com.adobe.marketing.mobile:messaging'
 implementation 'com.adobe.marketing.mobile:liveupdates'
 
+implementation 'androidx.core:core-ktx:1.17.0'
 implementation 'com.google.firebase:firebase-messaging:<latest-version>'
 ```
 
-`sdk-bom` 3.24.0 or newer includes all of the required minimum versions.
+Replace `<bom-version>` with the latest BOM version listed on [Current SDK versions](https://developer.adobe.com/client-sdks/home/current-sdk-versions/#android-bom). `sdk-bom` 3.24.0 or newer includes all of the required minimum Adobe versions.
 
 ## Register the extensions and the Live Updates plugin
 
 Register the Messaging and Edge extensions with `MobileCore.registerExtensions`, and the Live Updates plugin with `MobileCore.addPlugins`. The plugin takes an [`ILiveUpdateStyleProvider`](./api-usage.md#iliveupdatestyleprovider) that returns the notification style for each Live Update.
 
-Register the plugin in `Application.onCreate`, not in an `Activity`, so it is available when a push arrives and the system starts the app process in the background.
+Add the plugin in `Application.onCreate`, before you register the extensions and initialize the SDK, so it is available when the extensions start processing. Do not add it in an `Activity`: a push can start the app process in the background, and only `Application.onCreate` is guaranteed to run.
 
 #### Kotlin
 
@@ -62,13 +67,13 @@ class MyApplication : Application() {
         MobileCore.setApplication(this)
         MobileCore.setSmallIconResourceID(R.drawable.ic_notification)
 
+        MobileCore.addPlugins(LiveUpdatePlugin(MyLiveUpdateStyleProvider()))
+
         MobileCore.registerExtensions(
             listOf(Messaging.EXTENSION, Identity.EXTENSION, Edge.EXTENSION)
         ) {
             MobileCore.configureWithAppID("YOUR_ENVIRONMENT_FILE_ID")
         }
-
-        MobileCore.addPlugins(LiveUpdatePlugin(MyLiveUpdateStyleProvider()))
 
         // Optional: react to Live Update lifecycle events, taps, and dismissals.
         LiveUpdates.setLiveUpdateListener(object : ILiveUpdateListener {
@@ -90,11 +95,11 @@ public class MyApplication extends Application {
         MobileCore.setApplication(this);
         MobileCore.setSmallIconResourceID(R.drawable.ic_notification);
 
+        MobileCore.addPlugins(new LiveUpdatePlugin(new MyLiveUpdateStyleProvider()));
+
         MobileCore.registerExtensions(
                 Arrays.asList(Messaging.EXTENSION, Identity.EXTENSION, Edge.EXTENSION),
                 o -> MobileCore.configureWithAppID("YOUR_ENVIRONMENT_FILE_ID"));
-
-        MobileCore.addPlugins(new LiveUpdatePlugin(new MyLiveUpdateStyleProvider()));
 
         // Optional: react to Live Update lifecycle events, taps, and dismissals.
         // Java implementations must override every ILiveUpdateListener method.
@@ -148,7 +153,7 @@ Live Update pushes reach the plugin through the Messaging extension. For automat
 </service>
 ```
 
-If your app has its own `FirebaseMessagingService`, or needs to build the notification itself, see [Automatic, mixed, and manual handling of Live Updates](./integration-patterns.md).
+This is the same service registration that Adobe Journey Optimizer push notifications use, so if push notifications already work in your app, no change is needed. If your app has its own `FirebaseMessagingService`, or needs to build the notification itself, see [Automatic, mixed, and manual handling of Live Updates](./integration-patterns.md).
 
 ## Permissions
 
@@ -165,24 +170,30 @@ The plugin's manifest also declares its own tap tracking activity (`LiveUpdateTr
 
 Each Live Update targets the channel named by the payload's `notification_channel_id`. If no channel with that id exists, the plugin creates it with `IMPORTANCE_HIGH`, the name "Live Updates", and the description "Status-bar chips for AJO Live Updates".
 
-If your app has already created the channel, the plugin leaves it unchanged. In that case the channel must have `IMPORTANCE_HIGH` for the Live Update to be promoted to a chip.
+If your app has already created the channel, the plugin leaves it unchanged. In that case the channel must have `IMPORTANCE_HIGH` for the Live Update to be promoted to a chip. See [Create and manage notification channels](https://developer.android.com/develop/ui/views/notifications/channels) in the Android documentation.
 
 ## Small icon
 
-The small icon is resolved in this order:
+The plugin resolves the small icon in this order:
 
 1. The drawable named by the payload's `small_icon` field, if it exists in the app's resources.
 2. The icon set with `MobileCore.setSmallIconResourceID`.
-3. The app's launcher icon.
+3. The app icon (`android:icon` in your manifest).
+
+Setting a small icon is optional: if you set none, the plugin uses the app icon. Android draws the small icon as a single-color silhouette in the status bar and in the chip, so a dedicated notification icon usually looks better than the app icon.
 
 ## Promotion requirements
 
-A posted Live Update is promoted to a status-bar chip only when all of the following are true. When one is not, the notification is posted as a regular ongoing notification, a warning is logged, and an `incompatible` [diagnostic event](./tracking-and-diagnostics.md#diagnostic-events) is dispatched.
+The plugin requests promotion for every Live Update and always posts the notification. Android decides whether to promote it to a status-bar chip, based on the device, the notification, the channel, and the user's settings. A Live Update is promoted only when all of the following are true:
 
-- The device runs Android 16 (API 36) or newer.
-- `Notification.hasPromotableCharacteristics()` returns `true`. For example, the style must be eligible for promotion, and the payload must include a `title`.
+- The device runs Android 16 QPR2 (API 36.1) or newer.
+- `Notification.hasPromotableCharacteristics()` returns `true`. For example, the notification must use a style that Android allows for Live Updates. Some styles also need a title to render, so whether the payload's `title` is needed depends on the style you use, and can vary by device manufacturer.
 - The notification channel exists and has `IMPORTANCE_HIGH`.
 - `NotificationManager.canPostPromotedNotifications()` returns `true`. The user can turn off Live Updates for the app in system settings.
+
+For the full list of requirements, see [Live Updates](https://developer.android.com/develop/ui/views/notifications/live-update) in the Android documentation.
+
+Before posting, the plugin checks the device, `hasPromotableCharacteristics()`, the channel, and `canPostPromotedNotifications()`. When a check fails, the notification is posted as a regular ongoing notification, a warning is logged, and an `incompatible` [diagnostic event](./tracking-and-diagnostics.md#incompatible) is dispatched. The plugin's device check only detects devices below API 36. On a device running API 36.0, it does not report the Android version, and Android decides whether to promote the notification.
 
 ## Next steps
 

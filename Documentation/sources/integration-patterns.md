@@ -2,14 +2,19 @@
 
 There are three ways to connect Live Update pushes to the Live Updates plugin. In the first two, the plugin posts the notification. In the third, your app posts it.
 
+- **Automatic**: If your app registers the Messaging extension's `MessagingService` as its push receiver, it takes care of everything for you: Adobe Journey Optimizer push notifications and Live Updates.
+- **Mixed**: If your app has its own `FirebaseMessagingService`, it receives every push and hands Adobe Journey Optimizer pushes to the Messaging extension, which takes care of both standard pushes and Live Updates.
+- **Manual**: Your app builds and posts the Live Update notification itself and uses the plugin only for tracking. Use this only when you need full control over the notification.
+
 | | Automatic | Mixed | Manual |
 | --- | --------- | ----- | ------ |
 | FCM entry point | Messaging's `MessagingService` | Your `FirebaseMessagingService` | Your `FirebaseMessagingService` |
 | Who posts the notification | `LiveUpdatePlugin` | `LiveUpdatePlugin` | Your app |
 | `MobileCore.addPlugins(LiveUpdatePlugin(...))` | Required | Required | Not required |
-| Interceptor and timestamp validation | Yes | Yes | No |
-| Promotion and diagnostic events | Yes | Yes | No |
-| Lifecycle tracking and listener callbacks | Automatic | Automatic | `LiveUpdates.trackLiveUpdateEvent` |
+| Style provider, interceptor, and timestamp validation | Yes | Yes | No |
+| Promotion checks and diagnostic events | Yes | Yes | No |
+| Lifecycle tracking | Automatic | Automatic | Only when you call `LiveUpdates.trackLiveUpdateEvent` |
+| `onLiveUpdateReceived`, `onStart`, `onUpdate`, and `onEnd` callbacks | Automatic | Automatic | Only when you call `LiveUpdates.trackLiveUpdateEvent` |
 | Tap and dismiss tracking | Automatic | Automatic | `addPushTrackingDetails` and `handleNotificationResponse` |
 | `onClick` and `onDismissed` callbacks | Yes | Yes | No |
 
@@ -27,13 +32,15 @@ Register the plugin as shown in [Getting started](./getting-started.md#register-
 </service>
 ```
 
+This is the same service registration that Adobe Journey Optimizer push notifications use, described in [Automatically display and track push notification](https://developer.adobe.com/client-sdks/edge/adobe-journey-optimizer/push-notification/android/automatic-display-and-tracking). If push notifications already work in your app, the only additional step is registering the plugin.
+
 `MessagingService` detects the `adb_liveupdate_data` key and passes the push to the registered `ILiveupdatePlugin`. All other AJO pushes are displayed by the Messaging extension as usual.
 
 If a Live Update push arrives and no plugin is registered, Messaging drops it, logs a warning, and dispatches a `no_plugin` [diagnostic event](./tracking-and-diagnostics.md#diagnostic-events).
 
 ## Mixed handling
 
-If your app already has its own `FirebaseMessagingService`, register it instead of `MessagingService` and pass every message to `MessagingService.handleRemoteMessage`. Live Updates are routed to the plugin exactly as in automatic handling. The method returns `false` for pushes that were not sent by AJO, so your app can handle those itself.
+If your app already has its own `FirebaseMessagingService`, register it instead of `MessagingService` and pass every message to `MessagingService.handleRemoteMessage`, as described in [Using your own FirebaseMessagingService](https://developer.adobe.com/client-sdks/edge/adobe-journey-optimizer/push-notification/android/automatic-display-and-tracking#using-your-own-firebasemessagingservice). The same call handles both standard Adobe Journey Optimizer pushes and Live Updates: it routes Live Updates to the plugin exactly as in automatic handling, so your style provider, interceptor, listener, and automatic tracking all work. The method returns `true` for any AJO push it handled, including Live Updates, and `false` for pushes that were not sent by AJO, so your app can handle those itself.
 
 ```kotlin
 class MyPushService : FirebaseMessagingService() {
@@ -51,7 +58,17 @@ class MyPushService : FirebaseMessagingService() {
 
 ## Manual handling
 
-Use manual handling when your app needs full control of the notification. Your app parses the payload, builds and posts the notification, and uses the plugin's `LiveUpdates` APIs only for tracking. `LiveUpdatePlugin` is not involved, so the interceptor, timestamp validation, promotion checks, and diagnostic events do not apply.
+Use manual handling only when your app needs full control of the notification. Your app parses the payload, builds and posts the notification, and uses the plugin's `LiveUpdates` APIs only for tracking. It is the Live Update counterpart of [Manual display and tracking of push notification](https://developer.adobe.com/client-sdks/edge/adobe-journey-optimizer/push-notification/android/manual-display-and-tracking).
+
+> [!WARNING]
+> In manual mode, your app controls the notification fully, and the plugin flow does not run, even if you registered `LiveUpdatePlugin`, a listener, and an interceptor:
+>
+> - Your `ILiveUpdateInterceptor` and `ILiveUpdateStyleProvider` are not called.
+> - `event_type` and `timestamp` are not validated, and no promotion checks or diagnostic events run.
+> - `onLiveUpdateReceived`, `onStart`, `onUpdate`, and `onEnd` are called only when your app calls `LiveUpdates.trackLiveUpdateEvent`.
+> - `onClick` and `onDismissed` are never called.
+
+Because your app builds the notification, it must set a small icon. The plugin's fallback to the app icon applies only to notifications that the plugin posts. Android rejects a notification without a small icon: for apps targeting API 23 or higher, `NotificationManager.notify` throws an `IllegalArgumentException`.
 
 ```kotlin
 class MyPushService : FirebaseMessagingService() {
@@ -71,7 +88,7 @@ class MyPushService : FirebaseMessagingService() {
             )
 
             val notification = NotificationCompat.Builder(this, payload.channelId)
-                .setSmallIcon(R.drawable.ic_notification)
+                .setSmallIcon(R.drawable.ic_notification) // required in manual mode
                 .setContentTitle(payload.title)
                 .setContentText(payload.body)
                 .setOngoing(true)
@@ -128,11 +145,13 @@ The local Live Update is rendered like a pushed one, and the listener's `onLiveU
 
 Instead, the plugin stores the `notification_id` and `notification_channel_id`. When the first backend push with the same ids and an `_xdm` arrives, the plugin dispatches a `liveupdate_localstart` event, timestamped with when the local start happened, before that push's own tracking event. This links the local start to the campaign. The catch-up is dispatched only once.
 
-The backend push is still validated, so its `timestamp` must be newer than the `timestamp` of the local payload.
+The backend push still goes through the interceptor and validation, so it must not be dropped by your interceptor, and its `timestamp` must be newer than the `timestamp` of the local payload. A local start that is not reported within 28 days is discarded.
 
 ## Topic subscriptions
 
-Broadcast Live Updates, such as a sports score sent to many devices, are delivered through FCM topics. The plugin does not manage topic subscriptions. Your app subscribes through Firebase, typically from a listener callback, and reports the change with `trackTopicSubscribed` or `trackTopicUnsubscribed`:
+Broadcast Live Updates, such as a sports score sent to many devices, are delivered through FCM topics. The plugin does not manage topic subscriptions. Your app subscribes through Firebase, typically from a listener callback, and reports the change with `trackTopicSubscribed` or `trackTopicUnsubscribed`.
+
+Subscribe in `onStart`. Unsubscribe in `onEnd`, and also in `onDismissed`, so a device whose user dismissed the Live Update stops receiving its broadcast updates:
 
 ```kotlin
 LiveUpdates.setLiveUpdateListener(object : ILiveUpdateListener {
@@ -144,6 +163,15 @@ LiveUpdates.setLiveUpdateListener(object : ILiveUpdateListener {
     }
 
     override fun onEnd(payload: LiveUpdatePayload) {
+        unsubscribeFromTopic(payload)
+    }
+
+    override fun onDismissed(payload: LiveUpdatePayload) {
+        // The user dismissed the Live Update: stop receiving its broadcast updates.
+        unsubscribeFromTopic(payload)
+    }
+
+    private fun unsubscribeFromTopic(payload: LiveUpdatePayload) {
         val topic = payload.topicName ?: return
         FirebaseMessaging.getInstance().unsubscribeFromTopic(topic).addOnCompleteListener { task ->
             if (task.isSuccessful) LiveUpdates.trackTopicUnsubscribed(payload)
@@ -151,6 +179,8 @@ LiveUpdates.setLiveUpdateListener(object : ILiveUpdateListener {
     }
 })
 ```
+
+No topic event is dispatched when the payload has no `topic_name` or no `_xdm`.
 
 ## Handling taps and dismissals
 
@@ -170,7 +200,7 @@ With automatic or mixed handling, the plugin handles chip interactions:
 
 The listener must be registered in `Application.onCreate`, because a tap or dismissal can start the app process just to handle it. In that case, the payload is rebuilt from the most recently posted version of the notification.
 
-Notifications posted for an `end` push have no delete intent. After an `end` push, swiping the notification away, or its removal by `dismiss_after`, does not dispatch a dismiss event or call `onDismissed`.
+After a Live Update has ended, `onDismissed` is not called, whether the notification is removed automatically by `dismiss_after` or swiped away by the user. No dismiss tracking event is dispatched either, because notifications posted for an `end` push have no delete intent.
 
 ### Suppress Live Updates the user dismissed
 

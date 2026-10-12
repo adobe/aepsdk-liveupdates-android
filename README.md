@@ -5,7 +5,7 @@
 [![Code Coverage](https://codecov.io/gh/adobe/aepsdk-liveupdates-android/branch/main/graph/badge.svg)](https://codecov.io/gh/adobe/aepsdk-liveupdates-android)
 
 ## About this project
-The AEPLiveUpdates plugin for Adobe Experience Platform Mobile SDKs powers Live Updates for your Android apps — ongoing, promoted status-bar notifications (the Android counterpart to iOS Live Activities) built on Android 16 (API 36). Live Updates are delivered as Adobe Journey Optimizer (AJO) pushes through the Messaging extension, rendered with a notification style supplied by your app, and tracked (start, update, end, tap, and dismiss) back to Adobe Experience Platform through the Edge Network.
+The AEPLiveUpdates plugin for Adobe Experience Platform Mobile SDKs powers Live Updates for your Android apps — ongoing, promoted status-bar notifications (the Android counterpart to iOS Live Activities) built on Android's promoted ongoing notifications. Live Updates are delivered as Adobe Journey Optimizer (AJO) pushes through the Messaging extension, rendered with a notification style supplied by your app, and tracked (start, update, end, tap, and dismiss) back to Adobe Experience Platform through the Edge Network.
 
 Live Updates is a plugin, not an extension. It is registered with `MobileCore.addPlugins` rather than `MobileCore.registerExtensions`, and the Messaging extension hands Live Update pushes to it.
 
@@ -14,14 +14,17 @@ Live Updates is a plugin, not an extension. It is registered with `MobileCore.ad
 Integrate the AEPLiveUpdates plugin into your app by including the following in your app level gradle file's `dependencies`:
 
 ```groovy
-    implementation platform('com.adobe.marketing.mobile:sdk-bom:3.+')
+    implementation platform('com.adobe.marketing.mobile:sdk-bom:<bom-version>')
     implementation 'com.adobe.marketing.mobile:core'
     implementation 'com.adobe.marketing.mobile:assurance'
     implementation 'com.adobe.marketing.mobile:edge'
     implementation 'com.adobe.marketing.mobile:edgeidentity'
     implementation 'com.adobe.marketing.mobile:messaging'
     implementation 'com.adobe.marketing.mobile:liveupdates'
+    implementation 'androidx.core:core-ktx:1.17.0'
 ```
+
+Replace `<bom-version>` with the latest BOM version listed on [Current SDK versions](https://developer.adobe.com/client-sdks/home/current-sdk-versions/#android-bom).
 
 The Live Updates plugin requires the following minimum versions, which are included in `sdk-bom` 3.24.0 or newer:
 
@@ -31,8 +34,11 @@ The Live Updates plugin requires the following minimum versions, which are inclu
 | `edge`        | 3.1.0  |
 | `messaging`   | 3.13.0 |
 | `liveupdates` | 3.0.0  |
+| `androidx.core:core-ktx` | 1.17.0 |
 
-Your app must use `compileSdk` 36 or newer, as the Live Updates plugin is built against API 36 and `androidx.core:core-ktx` 1.17.0. The minimum supported `minSdk` is 21. Live Updates are promoted to a status-bar chip on devices running Android 16 (API 36) or newer; on older devices they are posted as regular ongoing notifications.
+Add `androidx.core:core-ktx` 1.17.0 or newer to your app explicitly. The plugin calls `NotificationCompat` APIs that were added in that version, but its published POM does not declare the dependency, so without it Gradle resolves an older version through the other Adobe libraries and the plugin fails at runtime. `androidx.core` 1.17.0 requires `compileSdk` 36 or newer. The minimum supported `minSdk` is 21.
+
+Live Updates are promoted to a status-bar chip on devices running Android 16 QPR2 (API 36.1) or newer, when Android allows it. Otherwise they are posted as regular ongoing notifications.
 
 Adding Firebase messaging sdk as it is required for using [FCM](https://firebase.google.com/docs/cloud-messaging/android/client#add_firebase_sdks_to_your_app)
 ```
@@ -54,7 +60,7 @@ To open and run the project, open the `code/build.gradle.kts` file in Android St
 **Run demo application**
 - Follow this [Firebase documentation](https://firebase.google.com/docs/cloud-messaging/android/client#add_a_firebase_configuration_file) to add the configuration file for your firebase project, replacing the template at `code/testapp/google-services.json`.
 - Set your Data Collection (Tags) mobile property environment file ID in `code/testapp/src/main/java/com/adobe/marketing/mobile/liveupdatessample/LiveUpdatesApplication.kt`.
-- Once you opened the project in Android Studio (see above), select the `testapp` runnable and your favorite emulator (Android 16 / API 36 or newer to see the status-bar chip) and run the program.
+- Once you opened the project in Android Studio (see above), select the `testapp` runnable and your favorite emulator (Android 16 QPR2 / API 36.1 or newer to see the status-bar chip) and run the program.
 
 **Build and test**
 
@@ -68,6 +74,8 @@ make lint             # run Spotless and Checkstyle checks
 
 ## Documentation
 Additional documentation for configuration and SDK usage can be found under the [Documentation](Documentation/README.md) directory.
+
+The public developer documentation is available at [Live Updates](https://developer.adobe.com/client-sdks/edge/adobe-journey-optimizer/live-activities/android/) on the Adobe Experience Platform Mobile SDK documentation site.
 
 ## Related Projects
 

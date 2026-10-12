@@ -9,7 +9,7 @@ The design document for `aepsdk-liveupdates-android`. For integration instructio
 | Goal | Why | How |
 |---|---|---|
 | **Live Updates are opt-in and additive.** Core and Messaging stay on their existing toolchain (commons 3.x, compileSdk 34). | The Live Update APIs (`ProgressStyle`, `setRequestPromotedOngoing`, `setShortCriticalText`) require `androidx.core` 1.17 / compileSdk 36 / AGP 8.9.1. Forcing that on every AEP consumer would propagate a major toolchain bump across the whole SDK family. | Live Updates ship in their own AAR, built with commons 4.0.0 (compileSdk 36). Only apps that add this AAR need compileSdk 36. |
-| **One-directional AAR compatibility.** | AAR metadata checks are one-way: an app at compileSdk 36 can use AARs built at 34, but an app at 34 cannot use an AAR built at 36. | The app and the Live Updates AAR use compileSdk 36. The Core and Messaging AARs stay at 34. At runtime, `androidx.core` resolves to 1.17.0, so `NotificationCompat.Builder` is the same class for every SDK. |
+| **One-directional AAR compatibility.** | AAR metadata checks are one-way: an app at compileSdk 36 can use AARs built at 34, but an app at 34 cannot use an AAR built at 36. | The app and the Live Updates AAR use compileSdk 36. The Core and Messaging AARs stay at 34. The app declares `androidx.core` 1.17.0, whose AAR metadata requires compileSdk 36, so at runtime `NotificationCompat.Builder` is the 1.17.0 class for every SDK. The Live Updates AAR itself does not enforce a minimum compileSdk. |
 | **No compile-time dependency between Messaging and Live Updates.** | Messaging must not depend on a compileSdk 36 AAR, and Live Updates should not be tied to Messaging internals. | Both depend on Core's plugin contract (`ILiveupdatePlugin`). The app registers `LiveUpdatePlugin` with `MobileCore.addPlugins`, and Messaging looks it up with `MobileCore.getPlugin`. The push is passed as `Any`, so Core does not depend on Firebase. |
 | **The app owns styling; the plugin owns everything else.** | Styling depends on the use case: a flight, a delivery, and a sports score look different. The notification id, channel, ongoing and promotion flags, intents, and tracking work the same for every use case. | The app implements `ILiveUpdateStyleProvider.provideStyle(payload): NotificationCompat.Style?`. The plugin does everything else. |
 | **The plugin does not depend on specific notification styles,** so it keeps working with API 37+ styles such as `MetricStyle`. | Building in knowledge of specific styles would exclude future Android notification styles. | The provider returns the base type `NotificationCompat.Style?`. The plugin never casts, inspects, or validates it. |
@@ -52,7 +52,7 @@ flowchart TB
     class Msg,Edge,Core existing
 ```
 
-- **Live Updates** depends on Core and Edge (`implementation`), `androidx.core:core-ktx` 1.17.0, and `firebase-messaging` (`compileOnly`, so the app provides it).
+- **Live Updates** depends on Core and Edge (`implementation`), `androidx.core:core-ktx` 1.17.0, and `firebase-messaging` (`compileOnly`, so the app provides it). The published POM lists only `core` and `edge`, so apps must declare `androidx.core` 1.17.0 or newer themselves. Without it, an app using `sdk-bom` 3.24.0 resolves `androidx.core` 1.12.0, which does not have `setRequestPromotedOngoing` or `setShortCriticalText`.
 - **Live Updates and Messaging do not depend on each other at compile time.** They connect at runtime through Core's plugin registry. `LiveUpdatesConstants.LIVE_UPDATE_DATA_KEY` intentionally duplicates Messaging's `adb_liveupdate_data` key so that no compile-time dependency is needed.
 - **Key rule:** Core and Messaging must never depend on the Live Updates plugin. That would force them onto commons 4.0.0 and pass the toolchain bump on to every AEP consumer.
 
@@ -271,11 +271,13 @@ An earlier diagnosis that it was ignored was wrong. The delay was caused by the 
 
 The checks run in this order: API 36 or newer, `Notification.hasPromotableCharacteristics()`, `NotificationManager` available, channel exists, channel importance at least `IMPORTANCE_HIGH`, and `canPostPromotedNotifications()`. The first failed check is logged and reported as an `incompatible` event, and the notification still posts.
 
+Android promotes notifications only on Android 16 QPR2 (API 36.1) or newer. The plugin's device check uses `Build.VERSION.SDK_INT`, which compares only the major API level, so on an API 36.0 device it passes, and Android decides whether to promote the notification.
+
 The plugin creates a missing channel with `IMPORTANCE_HIGH`, but never changes a channel the app already created.
 
 ### End notifications have no delete intent
 
-For `end` pushes the plugin sets `setTimeoutAfter`, when a `dismiss_after` value is present, and does not set a delete intent. As a result, once a Live Update has ended, swiping it away does not dispatch a dismiss event or call `onDismissed`.
+For `end` pushes the plugin sets `setTimeoutAfter`, when a `dismiss_after` value is present, and does not set a delete intent. As a result, after a Live Update has ended, `onDismissed` is not called and no dismiss event is dispatched, whether the notification is removed automatically by `dismiss_after` or swiped away by the user.
 
 ### Process death
 
@@ -303,6 +305,8 @@ Only lifecycle and topic events set `liveActivity.event`. A tap or dismissal dur
 - **Local updates other than start**: `triggerLocalLiveUpdate` is designed for `localstart`. Local `update` or `end` payloads are not handled specially (there is a TODO in `dispatchLiveUpdateEventTracking`).
 - **A simpler way to build local payloads**: `LiveUpdatePayload.create` has 14 parameters. A builder or shorter overload may be added depending on how apps use it.
 - **Public database API in Core**: Replace the use of Core's internal `SQLiteDatabaseHelper`.
+- **Declare `androidx.core` in the published POM**: The POM lists only `core` and `edge`, so apps must add `androidx.core` 1.17.0 themselves. Publishing it as a dependency would remove that step.
+- **Minor API level check**: Compare `Build.VERSION.SDK_INT_FULL` with `Build.VERSION_CODES_FULL.BAKLAVA_1` so that `device_api_below_36` (or a new subcategory) also covers API 36.0 devices.
 - **Merging into Messaging**: The package name `com.adobe.marketing.mobile.messaging.liveupdate` was chosen so the classes could move into the Messaging AAR without changing their names. App imports and wiring would stay the same, and the app would remove the `liveupdates` dependency. If both AARs remained on the classpath, D8 would fail the build with a "defined multiple times" error rather than failing silently at runtime.
 
 ### Non-goals

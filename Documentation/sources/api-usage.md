@@ -153,7 +153,7 @@ val rendered = LiveUpdates.triggerLocalLiveUpdate(context, payload)
 
 ### trackLiveUpdateEvent
 
-For [manual handling](./integration-patterns.md#manual-handling), where the app builds and posts the notification itself. This method dispatches the lifecycle tracking event for the push and calls the registered listener. It does not post a notification and does not consult the interceptor.
+For [manual handling](./integration-patterns.md#manual-handling), where the app builds and posts the notification itself. This method dispatches the lifecycle tracking event for the push and calls the listener's `onLiveUpdateReceived` and then `onStart`, `onUpdate`, or `onEnd`. It does not post a notification, and it does not call the interceptor or the style provider.
 
 If the payload does not parse, nothing happens. If `event_type` is not recognized, no tracking event is dispatched and only `onLiveUpdateReceived` is called. As with all tracking, no event is dispatched if the push has no `_xdm`.
 
@@ -261,7 +261,7 @@ override fun onStart(payload: LiveUpdatePayload) {
 
 ## ILiveUpdateStyleProvider
 
-The interface your app implements to supply the notification style for each Live Update. Return any `NotificationCompat.Style`, for example `ProgressStyle` on API 36+ or a newer style on later API levels. The plugin does not inspect the returned style.
+The interface your app implements to supply the notification style for each Live Update. Return any `NotificationCompat.Style`, for example `NotificationCompat.ProgressStyle`, or a newer style on later API levels. The plugin does not inspect the returned style.
 
 Returning `null` posts the notification without a style and dispatches a `style_null` diagnostic event. The provider is called on the push-processing thread.
 
@@ -289,6 +289,8 @@ ILiveUpdateStyleProvider provider = payload ->
 
 Optional callbacks for Live Update activity. In Kotlin, every method has an empty default implementation. In Java, override every method.
 
+The callbacks below describe automatic and mixed handling, where the plugin posts the notification. In [manual handling](./integration-patterns.md#manual-handling), the receive callbacks are called only when your app calls `trackLiveUpdateEvent`, and `onClick` and `onDismissed` are never called.
+
 | Method | Called when |
 | ------ | ----------- |
 | `onLiveUpdateReceived(payload)` | First, for every processed Live Update, regardless of `event_type`. |
@@ -296,7 +298,7 @@ Optional callbacks for Live Update activity. In Kotlin, every method has an empt
 | `onUpdate(payload)` | `event_type` is `update`. |
 | `onEnd(payload)` | `event_type` is `end`. |
 | `onClick(payload)` | The user taps the chip body. The plugin records the tap but does not open the app. Your app decides what to open. |
-| `onDismissed(payload)` | The user swipes the chip away. Not called once the Live Update has ended, as explained in [Handling taps and dismissals](./integration-patterns.md#handling-taps-and-dismissals). |
+| `onDismissed(payload)` | The user swipes the chip away. Not called after the Live Update has ended, whether the notification is removed by `dismiss_after` or swiped away. See [Handling taps and dismissals](./integration-patterns.md#handling-taps-and-dismissals). |
 
 `onClick` and `onDismissed` may run in an app process that was started just to deliver the interaction. Their payload is rebuilt from data saved on the notification when it was last posted, so use `payload.notificationId` to look up current state in your app. The plugin catches and logs exceptions thrown from the listener. The receive callbacks run on the push-processing thread, so do not do long-running work in them.
 

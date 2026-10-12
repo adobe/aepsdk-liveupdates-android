@@ -9,6 +9,8 @@ A Live Update is an FCM data message that carries two data keys:
 
 When the push is received through the Messaging extension, the message must also be recognized as an AJO push, which requires either `_xdm` or `adb_title` to be present.
 
+The standard AJO push keys, such as `adb_title` and `adb_body`, are not used to render a Live Update. The plugin builds the notification only from the envelope keys in `adb_liveupdate_data`.
+
 ## FCM message example
 
 ```json
@@ -36,12 +38,12 @@ FCM merges `message.data` and `message.android.data` into `RemoteMessage.getData
 | `notification_channel_id` | Yes | String | The Android notification channel. The plugin creates the channel with `IMPORTANCE_HIGH` if it does not exist. |
 | `event_type` | Yes | String | `start`, `update`, or `end`. Local Live Updates use `localstart`. Any other value is dropped. |
 | `timestamp` | Yes | Number | When the state was produced, in epoch **seconds**. See [Validation](#validation). |
-| `title` | No | String | The notification title. Required for the notification to be promoted to a chip. |
+| `title` | No | String | The notification title. A title is not mandatory, but some notification styles need one to render, so depending on the style your [style provider](./api-usage.md#iliveupdatestyleprovider) returns, it may be required. |
 | `body` | No | String | The notification text. |
 | `priority` | No | String | `PRIORITY_MAX`, `PRIORITY_HIGH`, `PRIORITY_LOW`, or `PRIORITY_MIN`. Any other value uses `PRIORITY_DEFAULT`. |
 | `critical_text` | No | String | Short text shown in the status-bar chip. |
 | `when` | No | Number | A time to display on the notification, in epoch **seconds**. An invalid value is ignored. |
-| `dismiss_after` | No | Number | Only applies when `event_type` is `end`. The number of seconds after the end push arrives before the notification is removed. |
+| `dismiss_after` | No | Number | Only applies when `event_type` is `end`. When greater than 0, the number of seconds after the end push arrives before the notification is removed. When absent, the notification stays on the device as an ongoing notification after the end push, until the user or your app removes it. |
 | `content_state` | No | Object | App-defined state for the style provider, such as a template type or progress. The plugin does not interpret it. |
 | `topic_name` | No | String | The FCM topic this Live Update is broadcast on. Reported in tracking events and used by `trackTopicSubscribed` and `trackTopicUnsubscribed`. |
 | `small_icon` | No | String | The name of a drawable resource in your app to use as the small icon, for example `ic_flight_notification`. |
@@ -111,7 +113,9 @@ The same `notification_id` and `notification_channel_id`, with a newer `timestam
 }
 ```
 
-`dismiss_after` is a duration measured from when the end push is posted on the device. Because it is relative, it does not depend on the device clock.
+`dismiss_after` is a duration measured from when the end push is posted on the device. Because it is relative, it does not depend on the device clock. Without `dismiss_after`, the notification stays on the device after the end push, as an ongoing notification, until the user or your app removes it.
+
+A push that arrives after `end` with the same `notification_id` and a newer `timestamp` posts the notification again. To prevent that, use an [interceptor](./integration-patterns.md#suppress-live-updates-the-user-dismissed).
 
 ## Validation
 

@@ -10,7 +10,7 @@
 
 - Prerequisites
   - Enable push notifications in your app by [adding the Firebase dependency.](https://firebase.google.com/docs/cloud-messaging/android/client)
-  - Set up push messaging with the [Messaging extension](https://github.com/adobe/aepsdk-messaging-android/blob/main/Documentation/README.md).
+  - Set up push messaging with the [Messaging extension](https://github.com/adobe/aepsdk-messaging-android/blob/main/Documentation/README.md). Live Updates are delivered as Adobe Journey Optimizer push notifications, so push must already work in your app: the push token synced with `MobileCore.setPushIdentifier` and the Messaging `FirebaseMessagingService` registered. See [Automatically display and track push notification](https://developer.adobe.com/client-sdks/edge/adobe-journey-optimizer/push-notification/android/automatic-display-and-tracking).
 - Developer Documentation
   - [API usage](./sources/api-usage.md)
   - [Live Update payload](./sources/payload.md)
@@ -24,3 +24,14 @@
 ### Design
 
 - [Architecture](./architecture.md)
+
+### Public developer documentation
+
+The Live Updates plugin is also documented on the Adobe Experience Platform Mobile SDK documentation site:
+
+- [Live Updates for Android](https://developer.adobe.com/client-sdks/edge/adobe-journey-optimizer/live-activities/android/)
+- [Live Updates implementation tutorial](https://developer.adobe.com/client-sdks/edge/adobe-journey-optimizer/live-activities/android/tutorial)
+- [Live Update payload](https://developer.adobe.com/client-sdks/edge/adobe-journey-optimizer/live-activities/android/payload)
+- [Live Updates API reference](https://developer.adobe.com/client-sdks/edge/adobe-journey-optimizer/live-activities/android/api-reference)
+- [Live Updates troubleshooting](https://developer.adobe.com/client-sdks/edge/adobe-journey-optimizer/live-activities/android/troubleshooting)
+- [Mobile Core plugins](https://developer.adobe.com/client-sdks/home/base/mobile-core/plugins/)

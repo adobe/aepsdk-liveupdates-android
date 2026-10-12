@@ -14,7 +14,7 @@ The test app is in `code/testapp` (application id `com.adobe.marketing.mobile.li
 ## Run the app
 
 1. Open `code/build.gradle.kts` in Android Studio.
-2. Select the `testapp` run configuration and a device or emulator running Android 16 (API 36) or newer. Older devices show Live Updates as regular ongoing notifications.
+2. Select the `testapp` run configuration and a device or emulator running Android 16 QPR2 (API 36.1) or newer. Older devices show Live Updates as regular ongoing notifications.
 3. Allow notifications when prompted.
 
 The main screen provides:
