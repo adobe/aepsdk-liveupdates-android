@@ -58,6 +58,19 @@ object LiveUpdates {
     private const val EVENT_NAME_LIVE_UPDATE_INCOMPATIBLE = "Live Update Incompatible"
     private const val EVENT_DATA_KEY_XDM = "xdm"
 
+    // Local-start registration event (Edge -> Mira). Not a tracking event: it carries no
+    // `_xdm` passthrough and no dataset override. ECID/org/sandbox are added by Edge.
+    private const val EVENT_NAME_LIVE_UPDATE_LOCAL_START_REGISTRATION = "Live Update Local Start Registration"
+    private const val EVENT_DATA_KEY_DATA = "data"
+    private const val XDM_VALUE_LIVE_ACTIVITY_LOCAL_START = "liveActivity.localStart"
+    private const val REGISTRATION_KEY_LIVE_ACTIVITY_ID = "liveActivityID"
+    private const val REGISTRATION_KEY_CHANNEL_ID = "channelID"
+    private const val REGISTRATION_KEY_ORIGIN = "origin"
+    private const val REGISTRATION_KEY_PLATFORM = "platform"
+    private const val REGISTRATION_KEY_EXPIRY = "expiry"
+    private const val REGISTRATION_VALUE_ORIGIN_LOCAL = "local"
+    private const val REGISTRATION_VALUE_PLATFORM_FCM = "fcm"
+
     // XDM schema field names - match the canonical AJO Push Tracking Experience Event Schema,
     // which is the same schema the iOS Live Activities tracking flow populates in production.
     private const val XDM_KEY_EVENT_TYPE = "eventType"
@@ -523,20 +536,23 @@ object LiveUpdates {
         val eventType = payload.eventType
 
         // Locally-triggered start ([LiveUpdates.triggerLocalLiveUpdate]): there is no backend
-        // `_xdm` yet, so there is nothing to report - do NOT dispatch a `received` tracking event.
-        // Instead register the (notificationId, channelId) so a later backend update/end can
-        // retroactively report the start, correlated to that campaign (see the catch-up below).
+        // `_xdm` yet, so there is nothing to report as a `received` tracking event.
+        // Instead (1) register the (notificationId, channelId) so a later backend update/end can
+        // retroactively report the start, correlated to that campaign (see the catch-up below),
+        // and (2) immediately register this device as the local owner with Mira, independent of
+        // campaign analytics, so backend targeting can be limited to this device.
         // Listener callbacks still fire (via invokeListener), independent of tracking.
         // TODO(local-update): this only handles a locally-triggered *start*. If the app is ever
         //   allowed to push a local *update* (event_type=update through triggerLocalLiveUpdate),
         //   decide whether that should suppress tracking / refresh the registry rather than take
         //   the catch-up path below (which assumes update/end come from the backend with `_xdm`).
         if (eventType == LiveUpdatePayload.EVENT_TYPE_LOCAL_START) {
-            NotificationHistoryManager.recordLocalStart(payload)
+            val startMillis = NotificationHistoryManager.recordLocalStart(payload)
+            dispatchLocalStartRegistration(payload, startMillis)
             Log.debug(
                 LiveUpdatesConstants.LOG_TAG, SELF_TAG,
-                "Local start id=${payload.notificationId}: registered for catch-up; no tracking " +
-                    "dispatched (locally triggered, no _xdm)."
+                "Local start id=${payload.notificationId}: registered for catch-up and with Mira; " +
+                    "no tracking dispatched (locally triggered, no _xdm)."
             )
             return
         }
@@ -696,6 +712,38 @@ object LiveUpdates {
             EventSource.REQUEST_CONTENT
         ).setEventData(eventData).build()
         MobileCore.dispatchEvent(event)
+    }
+
+    // ---------- Local-start registration (Edge -> Mira) ----------
+
+    /**
+     * Tells Mira this device started the Live Update locally, so backend delivery can be limited to
+     * the owning device instead of every device linked to the profile. Dispatched as an Edge event
+     * right after an accepted local start, independent of campaign analytics (there is no `_xdm`
+     * yet). Edge adds ECID / org / sandbox. [startMillis] is the same instant recorded for the
+     * `liveupdate_localstart` catch-up; the expiry is that instant plus the local-start registry TTL.
+     */
+    internal fun dispatchLocalStartRegistration(payload: LiveUpdatePayload, startMillis: Long) {
+        val expiry = TimeUtils.getISO8601UTCDateWithMilliseconds(
+            Date(startMillis + NotificationHistoryDatabase.LOCAL_START_TTL_MILLIS)
+        )
+        val eventData = mapOf<String, Any?>(
+            EVENT_DATA_KEY_XDM to mapOf<String, Any?>(XDM_KEY_EVENT_TYPE to XDM_VALUE_LIVE_ACTIVITY_LOCAL_START),
+            EVENT_DATA_KEY_DATA to mapOf<String, Any?>(
+                REGISTRATION_KEY_LIVE_ACTIVITY_ID to payload.notificationId,
+                REGISTRATION_KEY_CHANNEL_ID to payload.channelId,
+                REGISTRATION_KEY_ORIGIN to REGISTRATION_VALUE_ORIGIN_LOCAL,
+                REGISTRATION_KEY_PLATFORM to REGISTRATION_VALUE_PLATFORM_FCM,
+                REGISTRATION_KEY_EXPIRY to expiry
+            )
+        )
+        MobileCore.dispatchEvent(
+            Event.Builder(
+                EVENT_NAME_LIVE_UPDATE_LOCAL_START_REGISTRATION,
+                EventType.EDGE,
+                EventSource.REQUEST_CONTENT
+            ).setEventData(eventData).build()
+        )
     }
 
     // ---------- Render error / incompatibility reporting (Event Hub only) ----------

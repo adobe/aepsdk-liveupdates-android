@@ -90,8 +90,11 @@ internal object NotificationHistoryManager {
      * clock/unit an Event's own timestamp uses), independent of `payload.timestamp` (epoch seconds,
      * used by [recordAndValidate] for stale checks). Best effort: runs on the DB executor and
      * fails open (a broken DB never blocks a Live Update from rendering).
+     *
+     * @return the captured start time (epoch millis), returned even when the DB write fails so
+     * the caller can reuse the same instant (e.g. for the Mira registration event).
      */
-    fun recordLocalStart(payload: LiveUpdatePayload) {
+    fun recordLocalStart(payload: LiveUpdatePayload): Long {
         val eventTimestampMillis = System.currentTimeMillis()
         try {
             dbExecutor.submit {
@@ -104,6 +107,7 @@ internal object NotificationHistoryManager {
                 "Failed to record local start for id=${payload.notificationId}: ${e.localizedMessage}"
             )
         }
+        return eventTimestampMillis
     }
 
     /**

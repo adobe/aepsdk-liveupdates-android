@@ -460,14 +460,47 @@ class LiveUpdatesTest {
     }
 
     @Test
-    fun `dispatchLiveUpdateEventTracking does NOT dispatch tracking for a local start`() {
-        // A locally-triggered start has no backend _xdm, so no receive tracking event is
-        // dispatched; the start is registered for a later catch-up instead (DB fails open here).
+    fun `dispatchLiveUpdateEventTracking dispatches only the Mira registration for a local start`() {
+        // A locally-triggered start has no backend _xdm, so no `received` tracking event is
+        // dispatched; the only event is the local-owner registration (DB fails open here).
+        val before = System.currentTimeMillis()
+        LiveUpdates.dispatchLiveUpdateEventTracking(
+            mock(Context::class.java),
+            payload(eventType = LiveUpdatePayload.EVENT_TYPE_LOCAL_START, notificationId = "local-1")
+        )
+        val after = System.currentTimeMillis()
+
+        val captor = ArgumentCaptor.forClass(Event::class.java)
+        mobileCoreMock.verify({ MobileCore.dispatchEvent(captor.capture()) })
+        val event = captor.value
+        assertEquals(EventType.EDGE, event.type)
+        assertEquals(EventSource.REQUEST_CONTENT, event.source)
+
+        val xdm = xdmMap(event)
+        assertEquals("liveActivity.localStart", xdm["eventType"])
+        assertNull(xdm["_experience"])
+        assertNull(event.eventData!!["meta"])
+
+        @Suppress("UNCHECKED_CAST")
+        val data = event.eventData!!["data"] as Map<String, Any?>
+        assertEquals("local-1", data["liveActivityID"])
+        assertEquals("chan", data["channelID"])
+        assertEquals("local", data["origin"])
+        assertEquals("fcm", data["platform"])
+
+        val expiryMillis = java.time.Instant.parse(data["expiry"] as String).toEpochMilli()
+        val ttl = NotificationHistoryDatabase.LOCAL_START_TTL_MILLIS
+        assertTrue(expiryMillis in (before + ttl)..(after + ttl))
+    }
+
+    @Test
+    fun `dispatchLiveUpdateEventTracking registers a local start even when the dataset override is set`() {
+        setCachedDatasetId("ds-123")
         LiveUpdates.dispatchLiveUpdateEventTracking(
             mock(Context::class.java),
             payload(eventType = LiveUpdatePayload.EVENT_TYPE_LOCAL_START)
         )
-        mobileCoreMock.verify({ MobileCore.dispatchEvent(any()) }, never())
+        assertNull(captureEvent().eventData!!["meta"])
     }
 
     @Test
