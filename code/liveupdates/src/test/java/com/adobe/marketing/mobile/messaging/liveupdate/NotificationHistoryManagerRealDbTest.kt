@@ -19,6 +19,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.any
+import org.mockito.MockedStatic
 import org.mockito.Mockito.mockStatic
 import org.mockito.Mockito.never
 import org.mockito.Mockito.times
@@ -129,11 +130,11 @@ class NotificationHistoryManagerRealDbTest {
             xdm = JSONObject().put("mixins", JSONObject().put("campaignMarker", "camp-123"))
         )
 
-        // 1) Local start: registers for catch-up, dispatches NO tracking event.
+        // 1) Local start: registers for catch-up and dispatches ONLY the Mira registration (no tracking).
         val beforeLocalStartMillis = System.currentTimeMillis()
         mockStatic(MobileCore::class.java).use { m ->
             LiveUpdates.dispatchLiveUpdateEventTracking(ctx, local)
-            m.verify({ MobileCore.dispatchEvent(any()) }, never())
+            verifyOnlyRegistrationsDispatched(m, 1)
         }
         val afterLocalStartMillis = System.currentTimeMillis()
 
@@ -183,10 +184,10 @@ class NotificationHistoryManagerRealDbTest {
             xdm = JSONObject().put("mixins", JSONObject().put("campaignMarker", "camp-noxdm"))
         )
 
-        // 1) Local start: registers for catch-up, no tracking.
+        // 1) Local start: registers for catch-up, only the Mira registration is dispatched.
         mockStatic(MobileCore::class.java).use { m ->
             LiveUpdates.dispatchLiveUpdateEventTracking(ctx, local)
-            m.verify({ MobileCore.dispatchEvent(any()) }, never())
+            verifyOnlyRegistrationsDispatched(m, 1)
         }
 
         // 2) Backend update WITHOUT _xdm: nothing dispatched, and the catch-up entry is NOT consumed.
@@ -222,12 +223,13 @@ class NotificationHistoryManagerRealDbTest {
             xdm = JSONObject().put("mixins", JSONObject().put("campaignMarker", "camp-dup"))
         )
 
-        // The same live activity is started locally twice. Neither local start dispatches a
-        // tracking event, and the second only upserts the single registry row (no eviction).
+        // The same live activity is started locally twice. Each start dispatches only a Mira
+        // registration (no tracking event), and the second only upserts the single registry row
+        // (no eviction).
         mockStatic(MobileCore::class.java).use { m ->
             LiveUpdates.dispatchLiveUpdateEventTracking(ctx, local)
             LiveUpdates.dispatchLiveUpdateEventTracking(ctx, local)
-            m.verify({ MobileCore.dispatchEvent(any()) }, never())
+            verifyOnlyRegistrationsDispatched(m, 2)
         }
 
         // The first backend event fires exactly ONE localstart catch-up (not two) plus the
@@ -273,7 +275,7 @@ class NotificationHistoryManagerRealDbTest {
 
         mockStatic(MobileCore::class.java).use { m ->
             LiveUpdates.dispatchLiveUpdateEventTracking(ctx, local)
-            m.verify({ MobileCore.dispatchEvent(any()) }, never())
+            verifyOnlyRegistrationsDispatched(m, 1)
         }
         mockStatic(MobileCore::class.java).use { m ->
             LiveUpdates.dispatchLiveUpdateEventTracking(ctx, backend)
@@ -283,6 +285,12 @@ class NotificationHistoryManagerRealDbTest {
             assertEquals(1, events.count { it == "liveupdate_localstart" })
             assertEquals(1, events.count { it == expectedSubtype })
         }
+    }
+
+    private fun verifyOnlyRegistrationsDispatched(m: MockedStatic<MobileCore>, count: Int) {
+        val captor = ArgumentCaptor.forClass(Event::class.java)
+        m.verify({ MobileCore.dispatchEvent(captor.capture()) }, times(count))
+        captor.allValues.forEach { assertEquals("liveActivity.localStart", xdmOf(it)["eventType"]) }
     }
 
     @Suppress("UNCHECKED_CAST")

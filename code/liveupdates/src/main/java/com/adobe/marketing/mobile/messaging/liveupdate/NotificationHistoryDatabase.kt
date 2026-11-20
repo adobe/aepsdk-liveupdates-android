@@ -268,7 +268,7 @@ internal class NotificationHistoryDatabase internal constructor(private val data
         // Locally-started Live Update registry (same DB, separate table).
         private const val TABLE_LOCAL_STARTS = "local_started_live_updates"
         private const val COLUMN_EVENT_TIMESTAMP = "eventTimestamp"
-        private val LOCAL_START_TTL_MILLIS = TimeUnit.DAYS.toMillis(28)
+        internal val LOCAL_START_TTL_MILLIS = TimeUnit.DAYS.toMillis(28)
 
         @Volatile
         private var instance: NotificationHistoryDatabase? = null
